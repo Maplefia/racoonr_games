@@ -1,0 +1,1785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recycle Rush</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka+One&display=swap');
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            font-family: 'Fredoka One', cursive;
+        }
+        canvas {
+            display: block;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            max-width: 100vw;
+            max-height: 100vh;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            touch-action: none;
+            user-select: none;
+        }
+
+        #rotateMessage {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #111827;
+            color: white;
+            z-index: 9999;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 20px;
+        }
+
+        #rotateMessage svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 24px;
+            fill: #A855F7;
+            animation: rotate-phone 2s infinite ease-in-out;
+        }
+
+        @keyframes rotate-phone {
+            0%, 10% { transform: rotate(0deg); }
+            40%, 60% { transform: rotate(-90deg); }
+            90%, 100% { transform: rotate(0deg); }
+        }
+
+        @media (orientation: portrait) {
+            #rotateMessage { display: flex; }
+            canvas { display: none; }
+            #mobileControls { display: none !important; }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 flex items-center justify-center min-h-screen">
+    <div id="rotateMessage">
+        <svg viewBox="0 0 24 24">
+            <path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/>
+        </svg>
+        <h1 class="text-3xl font-bold mb-4" style="font-family: 'Fredoka One', cursive;">Rotate Your Device</h1>
+        <p class="text-xl">Please switch to landscape mode to play!</p>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+    
+    <script>
+        // Performance optimizations
+        'use strict';
+        
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d', { alpha: false });
+        canvas.width = 900;
+        canvas.height = 500;
+
+        // Pre-calculate constants
+        const TWO_PI = Math.PI * 2;
+        const HALF_PI = Math.PI / 2;
+
+        // Game States
+        const STATES = { CUTSCENE: 0, PLAYING: 1, PAUSED: 2, GAMEOVER: 3, VICTORY: 4, SORTING: 5, SORT_RESULT: 6 };
+        let gameState = STATES.CUTSCENE;
+        let cutsceneFrame = 0;
+        const cutsceneDuration = 180;
+
+        // Audio Context for sounds (lazy initialization)
+        let audioCtx = null;
+        
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+        
+        function playSound(freq, duration, type = 'square') {
+            if (!audioCtx) return;
+            try {
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                oscillator.frequency.value = freq;
+                oscillator.type = type;
+                gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+                oscillator.start(audioCtx.currentTime);
+                oscillator.stop(audioCtx.currentTime + duration);
+            } catch(e) {}
+        }
+
+        function playJumpSound() { playSound(400, 0.15, 'sine'); }
+        function playCollectSound() { playSound(800, 0.1, 'sine'); setTimeout(() => playSound(1000, 0.1, 'sine'), 50); }
+        function playHurtSound() { playSound(200, 0.3, 'sawtooth'); }
+        function playVictorySound() { [0,100,200,300].forEach((d,i) => setTimeout(() => playSound(500 + i*100, 0.2, 'sine'), d)); }
+
+        // Game variables
+        let lives = 3;
+        let score = 0;
+        let timeLeft = 120;
+        let cameraX = 0;
+        let lastCheckpoint = { x: 100, y: 300 };
+        let invincible = false;
+        let invincibleTimer = 0;
+
+        // ---- Sorting Minigame ----
+        const SORT_BINS = [
+            { label: 'PLASTIC', sublabel: 'Bottles', color: '#3B82F6', dark: '#1E3A8A', type: 'bottle', x: 175, y: 390, w: 200, h: 160 },
+            { label: 'PAPER',   sublabel: 'Paper',   color: '#10B981', dark: '#064E3B', type: 'paper',  x: 450, y: 390, w: 200, h: 160 },
+            { label: 'CLOTHES', sublabel: 'Textiles',color: '#EF4444', dark: '#7F1D1D', type: 'clothes',x: 725, y: 390, w: 200, h: 160 },
+        ];
+        let sortingItems = [];
+        let sortingIndex = 0;
+        let sortingTimeSec = 45;
+        let sortingTimerInterval = null;
+        let sortingScore = 0;
+        let sortingCorrect = 0;
+        let sortingWrong = 0;
+        let sortingFlash = { active: false, correct: true, timer: 0 };
+        let sortingBounce = 0;
+        let sortDrag = { active: false, canvasX: 0, canvasY: 0 };
+
+        // Player (Ball) - PURPLE COLOR
+        const player = {
+            x: 100, y: 300, vx: 0, vy: 0,
+            radius: 20, grounded: false,
+            color: '#A855F7',        // Purple main color
+            strokeColor: '#7C3AED',  // Darker purple outline
+            rotation: 0
+        };
+
+        // Controls
+        const keys = { left: false, right: false, up: false };
+        
+        document.addEventListener('keydown', (e) => {
+            initAudio();
+            if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
+            if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
+            if ((e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') && player.grounded && gameState === STATES.PLAYING) {
+                player.vy = -13;
+                player.grounded = false;
+                playJumpSound();
+            }
+            if (e.key === 'p' || e.key === 'Escape') {
+                if (gameState === STATES.PLAYING) gameState = STATES.PAUSED;
+                else if (gameState === STATES.PAUSED) gameState = STATES.PLAYING;
+            }
+            if (e.key === 'Enter' || e.key === ' ') {
+                if (gameState === STATES.CUTSCENE) gameState = STATES.PLAYING;
+                else if (gameState === STATES.GAMEOVER) resetGame();
+                else if (gameState === STATES.VICTORY) initSortingMinigame();
+                else if (gameState === STATES.SORT_RESULT) resetGame();
+            }
+            if (gameState === STATES.SORTING) {
+                if (e.key === '1') trySort('bottle');
+                else if (e.key === '2') trySort('paper');
+                else if (e.key === '3') trySort('clothes');
+            }
+            // DEV SHORTCUT: T → jump straight to sorting screen with all items collected
+            if (e.key === 't' || e.key === 'T') {
+                collectibles.forEach(c => c.collected = true);
+                initSortingMinigame();
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
+            if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
+            if (e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') keys.up = false;
+        });
+
+        // Drag-and-drop handlers for sorting minigame
+        function getCanvasPos(clientX, clientY) {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: (clientX - rect.left) * (canvas.width / rect.width),
+                y: (clientY - rect.top) * (canvas.height / rect.height)
+            };
+        }
+
+        const ITEM_CARD_X1 = canvas.width / 2 - 70;
+        const ITEM_CARD_X2 = canvas.width / 2 + 70;
+        const ITEM_CARD_Y1 = 122;
+        const ITEM_CARD_Y2 = 262;
+
+        function isOverItemCard(cx, cy) {
+            return cx >= ITEM_CARD_X1 && cx <= ITEM_CARD_X2 && cy >= ITEM_CARD_Y1 && cy <= ITEM_CARD_Y2;
+        }
+
+        function getBinAtCanvasPos(cx, cy) {
+            for (const bin of SORT_BINS) {
+                const bx = bin.x - bin.w / 2;
+                const by = bin.y - bin.h / 2;
+                if (cx >= bx && cx <= bx + bin.w && cy >= by && cy <= by + bin.h) return bin.type;
+            }
+            return null;
+        }
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (gameState !== STATES.SORTING || sortingIndex >= sortingItems.length) return;
+            const pos = getCanvasPos(e.clientX, e.clientY);
+            if (isOverItemCard(pos.x, pos.y)) {
+                sortDrag.active = true;
+                sortDrag.canvasX = pos.x;
+                sortDrag.canvasY = pos.y;
+                canvas.style.cursor = 'grabbing';
+            }
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (gameState !== STATES.SORTING) return;
+            const pos = getCanvasPos(e.clientX, e.clientY);
+            if (sortDrag.active) {
+                sortDrag.canvasX = pos.x;
+                sortDrag.canvasY = pos.y;
+            } else {
+                canvas.style.cursor = (isOverItemCard(pos.x, pos.y) && sortingIndex < sortingItems.length) ? 'grab' : 'default';
+            }
+        });
+
+        window.addEventListener('mouseup', (e) => {
+            if (gameState !== STATES.SORTING || !sortDrag.active) return;
+            sortDrag.active = false;
+            canvas.style.cursor = 'default';
+            const pos = getCanvasPos(e.clientX, e.clientY);
+            const binType = getBinAtCanvasPos(pos.x, pos.y);
+            if (binType) trySort(binType);
+        });
+
+        canvas.addEventListener('touchstart', (e) => {
+            if (gameState !== STATES.SORTING || sortingIndex >= sortingItems.length) return;
+            const touch = e.changedTouches[0];
+            const pos = getCanvasPos(touch.clientX, touch.clientY);
+            if (isOverItemCard(pos.x, pos.y)) {
+                e.preventDefault();
+                sortDrag.active = true;
+                sortDrag.canvasX = pos.x;
+                sortDrag.canvasY = pos.y;
+            }
+        }, { passive: false });
+
+        canvas.addEventListener('touchmove', (e) => {
+            if (gameState !== STATES.SORTING || !sortDrag.active) return;
+            e.preventDefault();
+            const touch = e.changedTouches[0];
+            const pos = getCanvasPos(touch.clientX, touch.clientY);
+            sortDrag.canvasX = pos.x;
+            sortDrag.canvasY = pos.y;
+        }, { passive: false });
+
+        canvas.addEventListener('touchend', (e) => {
+            if (gameState !== STATES.SORTING || !sortDrag.active) return;
+            e.preventDefault();
+            sortDrag.active = false;
+            const touch = e.changedTouches[0];
+            const pos = getCanvasPos(touch.clientX, touch.clientY);
+            const binType = getBinAtCanvasPos(pos.x, pos.y);
+            if (binType) trySort(binType);
+        }, { passive: false });
+
+        // Level elements - using typed arrays for better performance
+        const platforms = [
+            { x: 0, y: 420, w: 500, h: 80, moving: false },
+            { x: 550, y: 380, w: 150, h: 20, moving: false },
+            { x: 750, y: 340, w: 100, h: 20, moving: false },
+            { x: 900, y: 420, w: 300, h: 80, moving: false },
+            { x: 1250, y: 350, w: 100, h: 20, moving: true, moveRange: 80, speed: 2, dir: 1, axis: 'y', origY: 350 },
+            { x: 1400, y: 300, w: 150, h: 20, moving: false },
+            { x: 1600, y: 420, w: 200, h: 80, moving: false },
+            { x: 1850, y: 350, w: 120, h: 20, moving: true, moveRange: 100, speed: 1.5, dir: 1, axis: 'x', origX: 1850 },
+            { x: 2050, y: 300, w: 100, h: 20, moving: false },
+            { x: 2200, y: 420, w: 400, h: 80, moving: false },
+            { x: 2650, y: 350, w: 100, h: 20, moving: false },
+            { x: 2800, y: 280, w: 100, h: 20, moving: false },
+            { x: 2950, y: 420, w: 300, h: 80, moving: false },
+            { x: 3300, y: 380, w: 150, h: 20, moving: true, moveRange: 60, speed: 2, dir: 1, axis: 'y', origY: 380 },
+            { x: 3500, y: 420, w: 500, h: 80, moving: false }
+        ];
+
+        const spikes = [
+            { x: 1000, y: 400, w: 60, h: 20 },
+            { x: 1650, y: 400, w: 40, h: 20 },
+            { x: 2300, y: 400, w: 80, h: 20 },
+            { x: 3050, y: 400, w: 60, h: 20 }
+        ];
+
+        const collectibles = [
+            { x: 200, y: 380, type: 'bottle', collected: false },
+            { x: 350, y: 380, type: 'paper', collected: false },
+            { x: 580, y: 340, type: 'clothes', collected: false },
+            { x: 770, y: 300, type: 'bottle', collected: false },
+            { x: 980, y: 380, type: 'paper', collected: false },
+            { x: 1300, y: 280, type: 'bottle', collected: false },
+            { x: 1450, y: 260, type: 'clothes', collected: false },
+            { x: 1710, y: 380, type: 'paper', collected: false },
+            { x: 1900, y: 280, type: 'bottle', collected: false },
+            { x: 2100, y: 260, type: 'clothes', collected: false },
+            { x: 2400, y: 380, type: 'paper', collected: false },
+            { x: 2500, y: 380, type: 'bottle', collected: false },
+            { x: 2700, y: 310, type: 'clothes', collected: false },
+            { x: 2850, y: 240, type: 'paper', collected: false },
+            { x: 3150, y: 380, type: 'bottle', collected: false },
+            { x: 3400, y: 300, type: 'clothes', collected: false },
+            { x: 3600, y: 380, type: 'paper', collected: false },
+            { x: 3800, y: 380, type: 'bottle', collected: false }
+        ];
+
+        const enemies = [
+            { x: 400, y: 390, size: 30, vx: 1, range: 80, origX: 400, active: true },
+            { x: 1100, y: 390, size: 30, vx: 1.5, range: 100, origX: 1100, active: true },
+            { x: 2400, y: 390, size: 30, vx: 1, range: 120, origX: 2400, active: true },
+            { x: 3000, y: 390, size: 30, vx: 2, range: 80, origX: 3000, active: true },
+            { x: 3650, y: 390, size: 40, vx: 1.5, range: 100, origX: 3650, active: true }
+        ];
+
+        const checkpoints = [
+            { x: 900, y: 390, activated: false },
+            { x: 1600, y: 390, activated: false },
+            { x: 2200, y: 390, activated: false },
+            { x: 2950, y: 390, activated: false }
+        ];
+
+        const goalFlag = { x: 3900, y: 340, w: 10, h: 80 };
+
+        // Pre-render static elements for performance
+        let backgroundCanvas, backgroundCtx;
+        
+        function createBackgroundBuffer() {
+            backgroundCanvas = document.createElement('canvas');
+            backgroundCanvas.width = canvas.width;
+            backgroundCanvas.height = canvas.height;
+            backgroundCtx = backgroundCanvas.getContext('2d');
+            
+            // Sky gradient
+            const skyGrad = backgroundCtx.createLinearGradient(0, 0, 0, canvas.height);
+            skyGrad.addColorStop(0, '#87CEEB');
+            skyGrad.addColorStop(1, '#E0F6FF');
+            backgroundCtx.fillStyle = skyGrad;
+            backgroundCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Sun
+            backgroundCtx.fillStyle = '#FFE87C';
+            backgroundCtx.beginPath();
+            backgroundCtx.arc(750, 80, 50, 0, TWO_PI);
+            backgroundCtx.fill();
+        }
+
+        // Delta time for smooth movement
+        let lastFrameTime = performance.now();
+        let deltaTime = 0;
+        const targetFPS = 60;
+        const frameTime = 1000 / targetFPS;
+
+        // Timer
+        let timerInterval = null;
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                if (gameState === STATES.PLAYING) {
+                    timeLeft -= 1;
+                    if (timeLeft <= 0) {
+                        gameState = STATES.GAMEOVER;
+                    }
+                }
+            }, 1000);
+        }
+
+        function resetGame() {
+            lives = 3;
+            score = 0;
+            timeLeft = 120;
+            player.x = 100;
+            player.y = 300;
+            player.vx = 0;
+            player.vy = 0;
+            player.rotation = 0;
+            lastCheckpoint = { x: 100, y: 300 };
+            cameraX = 0;
+            invincible = false;
+            invincibleTimer = 0;
+            collectibles.forEach(c => c.collected = false);
+            checkpoints.forEach(c => c.activated = false);
+            enemies.forEach(e => { e.x = e.origX; e.active = true; });
+            gameState = STATES.PLAYING;
+            startTimer();
+            const mc = document.getElementById('mobileControls');
+            if (mc) mc.style.display = '';
+        }
+
+        // ============ SORTING MINIGAME FUNCTIONS ============
+
+        function initSortingMinigame() {
+            const collected = collectibles.filter(c => c.collected);
+            sortingItems = collected.map(c => ({ type: c.type })).sort(() => Math.random() - 0.5);
+            sortingIndex = 0;
+            sortingTimeSec = 30;
+            sortingScore = 0;
+            sortingCorrect = 0;
+            sortingWrong = 0;
+            sortingFlash = { active: false, correct: true, timer: 0 };
+            sortingBounce = 0;
+            sortDrag = { active: false, canvasX: 0, canvasY: 0 };
+            if (sortingTimerInterval) clearInterval(sortingTimerInterval);
+            sortingTimerInterval = setInterval(() => {
+                if (gameState === STATES.SORTING) {
+                    sortingTimeSec--;
+                    if (sortingTimeSec <= 0) {
+                        sortingTimeSec = 0;
+                        clearInterval(sortingTimerInterval);
+                        finishSorting();
+                    }
+                }
+            }, 1000);
+            gameState = STATES.SORTING;
+            const mc = document.getElementById('mobileControls');
+            if (mc) mc.style.display = 'none';
+        }
+
+        function trySort(binType) {
+            if (gameState !== STATES.SORTING) return;
+            if (sortingIndex >= sortingItems.length) return;
+            const item = sortingItems[sortingIndex];
+            if (item.type === binType) {
+                sortingCorrect++;
+                score += 50;
+                sortingScore += 50;
+                sortingFlash = { active: true, correct: true, timer: 40 };
+                playCollectSound();
+            } else {
+                sortingWrong++;
+                sortingTimeSec = Math.max(0, sortingTimeSec - 5);
+                sortingFlash = { active: true, correct: false, timer: 40 };
+                playHurtSound();
+            }
+            sortingIndex++;
+            if (sortingIndex >= sortingItems.length) {
+                if (sortingTimerInterval) clearInterval(sortingTimerInterval);
+                setTimeout(finishSorting, 700);
+            }
+        }
+
+        function finishSorting() {
+            gameState = STATES.SORT_RESULT;
+            window.parent.postMessage({ type: 'score', value: score }, '*');
+            // Show mobile controls so user can tap to restart
+            const mc = document.getElementById('mobileControls');
+            if (mc) mc.style.display = '';
+        }
+
+        function drawSortItemIcon(type, x, y, scale) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.scale(scale, scale);
+            if (type === 'bottle') {
+                // Plastic Bottle Body
+                ctx.fillStyle = 'rgba(0, 206, 209, 0.8)';
+                ctx.beginPath(); ctx.rect(-10, -15, 20, 35); ctx.fill();
+                ctx.strokeStyle = '#008B8B'; ctx.lineWidth = 2; ctx.stroke();
+                // Label
+                ctx.fillStyle = '#fff'; ctx.fillRect(-10, -5, 20, 15);
+                ctx.fillStyle = '#008B8B';
+                ctx.beginPath(); ctx.rect(-8, 0, 16, 5); ctx.fill();
+                // Neck
+                ctx.fillStyle = 'rgba(0, 206, 209, 0.8)';
+                ctx.fillRect(-5, -22, 10, 7); ctx.strokeRect(-5, -22, 10, 7);
+                // Cap
+                ctx.fillStyle = '#FF4500'; ctx.fillRect(-7, -27, 14, 5);
+                // Highlight
+                ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fillRect(4, -12, 3, 25);
+            } else if (type === 'paper') {
+                // Paper Sheet
+                ctx.fillStyle = '#F5F5F5';
+                ctx.beginPath();
+                ctx.moveTo(-12, -18); ctx.lineTo(12, -18); ctx.lineTo(18, -12);
+                ctx.lineTo(18, 18); ctx.lineTo(-18, 18); ctx.lineTo(-18, -12);
+                ctx.closePath(); ctx.fill();
+                // Fold detail
+                ctx.fillStyle = '#E0E0E0';
+                ctx.beginPath();
+                ctx.moveTo(12, -18); ctx.lineTo(12, -12); ctx.lineTo(18, -12); ctx.fill();
+                ctx.strokeStyle = '#999'; ctx.lineWidth = 2; ctx.stroke();
+                // Lines
+                ctx.fillStyle = '#555';
+                ctx.fillRect(-10, -5, 20, 2); ctx.fillRect(-10, 0, 20, 2); ctx.fillRect(-10, 5, 14, 2);
+                // Recycle symbol
+                ctx.fillStyle = '#4CAF50'; ctx.font = '12px Arial';
+                ctx.textAlign = 'center'; ctx.fillText('♻', -6, -8);
+            } else if (type === 'clothes') {
+                // T-Shirt Shape
+                ctx.fillStyle = '#FF6B6B'; ctx.strokeStyle = '#B22222'; ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(-6, -20); ctx.quadraticCurveTo(0, -15, 6, -20);
+                ctx.lineTo(16, -18); ctx.lineTo(24, -8); ctx.lineTo(18, -4); ctx.lineTo(14, -8);
+                ctx.lineTo(14, 18); ctx.lineTo(-14, 18); ctx.lineTo(-14, -8);
+                ctx.lineTo(-18, -4); ctx.lineTo(-24, -8); ctx.lineTo(-16, -18);
+                ctx.closePath(); ctx.fill(); ctx.stroke();
+                // Star design
+                ctx.fillStyle = '#fff'; ctx.font = '10px Arial';
+                ctx.textAlign = 'center'; ctx.fillText('★', 0, 2);
+            }
+            ctx.restore();
+        }
+
+        function drawSortingMinigame(dt) {
+            sortingFlash.timer -= (dt || 1);
+            if (sortingFlash.timer <= 0) sortingFlash.active = false;
+
+            // Background
+            ctx.fillStyle = '#0F172A';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Flash overlay
+            if (sortingFlash.active && sortingFlash.timer > 0) {
+                const alpha = (sortingFlash.timer / 40) * 0.35;
+                ctx.fillStyle = sortingFlash.correct ? `rgba(34,197,94,${alpha})` : `rgba(239,68,68,${alpha})`;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            ctx.textAlign = 'center';
+
+            // Title
+            ctx.fillStyle = '#A855F7';
+            ctx.font = 'bold 34px Fredoka One, sans-serif';
+            ctx.fillText('♻  SORT YOUR RECYCLABLES!  ♻', canvas.width / 2, 44);
+
+            // Timer
+            const timerColor = sortingTimeSec <= 10 ? '#FF4444' : '#FFD700';
+            ctx.fillStyle = timerColor;
+            ctx.font = 'bold 26px Fredoka One, sans-serif';
+            ctx.fillText(`⏱ ${sortingTimeSec}s`, canvas.width / 2, 80);
+
+            if (sortingItems.length === 0) {
+                ctx.fillStyle = '#94A3B8';
+                ctx.font = '28px Fredoka One, sans-serif';
+                ctx.fillText('No items collected!', canvas.width / 2, canvas.height / 2);
+                ctx.font = '22px Arial';
+                ctx.fillText('Press ENTER or tap Jump to play again', canvas.width / 2, canvas.height / 2 + 50);
+                ctx.textAlign = 'left';
+                return;
+            }
+
+            // Progress
+            ctx.fillStyle = '#94A3B8';
+            ctx.font = '20px Fredoka One, sans-serif';
+            ctx.fillText(`Item ${Math.min(sortingIndex + 1, sortingItems.length)} of ${sortingItems.length}`, canvas.width / 2, 110);
+
+            // Current item
+            if (sortingIndex < sortingItems.length) {
+                const item = sortingItems[sortingIndex];
+                // Item card — ghost out when dragging
+                ctx.globalAlpha = sortDrag.active ? 0.25 : 1;
+                ctx.fillStyle = '#1E293B';
+                ctx.strokeStyle = sortDrag.active ? '#64748B' : '#A855F7'; ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.roundRect(canvas.width / 2 - 70, 122, 140, 140, 12); ctx.fill(); ctx.stroke();
+                // Bouncing icon (only draw in card when not dragging)
+                if (!sortDrag.active) {
+                    sortingBounce += 0.07;
+                    const bobY = Math.sin(sortingBounce) * 5;
+                    drawSortItemIcon(item.type, canvas.width / 2, 192 + bobY, 2.4);
+                }
+                ctx.globalAlpha = 1;
+                // Type label
+                const typeLabel = item.type === 'bottle' ? 'PLASTIC BOTTLE' : item.type === 'paper' ? 'PAPER' : 'CLOTHING';
+                ctx.fillStyle = '#CBD5E1'; ctx.font = 'bold 18px Fredoka One, sans-serif';
+                ctx.fillText(typeLabel, canvas.width / 2, 285);
+                // Prompt
+                ctx.fillStyle = sortDrag.active ? '#22C55E' : '#64748B'; ctx.font = '18px sans-serif';
+                ctx.fillText(sortDrag.active ? '→  Drop into the correct bin!  ←' : '✋  Grab and drag to a bin above  ✋', canvas.width / 2, 495);
+            } else {
+                ctx.fillStyle = '#22C55E';
+                ctx.font = 'bold 30px Fredoka One, sans-serif';
+                ctx.fillText('All items sorted!', canvas.width / 2, 220);
+            }
+
+            // Draw bins
+            SORT_BINS.forEach((bin, i) => {
+                const bx = bin.x - bin.w / 2;
+                const by = bin.y - bin.h / 2;
+                const isHovered = sortDrag.active && getBinAtCanvasPos(sortDrag.canvasX, sortDrag.canvasY) === bin.type;
+                // Shadow
+                ctx.fillStyle = 'rgba(0,0,0,0.35)';
+                ctx.beginPath(); ctx.roundRect(bx + 5, by + 5, bin.w, bin.h, 12); ctx.fill();
+                // Glow ring when hovered
+                if (isHovered) {
+                    ctx.strokeStyle = 'white'; ctx.lineWidth = 6;
+                    ctx.shadowColor = 'white'; ctx.shadowBlur = 18;
+                    ctx.beginPath(); ctx.roundRect(bx - 3, by - 3, bin.w + 6, bin.h + 6, 14); ctx.stroke();
+                    ctx.shadowBlur = 0;
+                }
+                // Body
+                ctx.fillStyle = isHovered ? lightenColor(bin.color) : bin.color;
+                ctx.strokeStyle = bin.dark; ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.roundRect(bx, by, bin.w, bin.h, 12); ctx.fill(); ctx.stroke();
+                // Key badge
+                ctx.fillStyle = bin.dark;
+                ctx.beginPath(); ctx.roundRect(bx + bin.w / 2 - 20, by - 20, 40, 32, 8); ctx.fill();
+                ctx.fillStyle = 'white'; ctx.font = 'bold 22px Fredoka One, sans-serif';
+                ctx.fillText(`${i + 1}`, bin.x, by - 20 + 23);
+                // Bin label
+                ctx.fillStyle = 'white'; ctx.font = 'bold 18px Fredoka One, sans-serif';
+                ctx.fillText(bin.label, bin.x, by + 34);
+                ctx.font = '14px Fredoka One, sans-serif';
+                ctx.fillStyle = 'rgba(255,255,255,0.85)';
+                ctx.fillText(bin.sublabel, bin.x, by + 54);
+                // Mini icon
+                drawSortItemIcon(bin.type, bin.x, by + 112, 1.5);
+            });
+
+            // Floating dragged item (drawn last so it's on top of everything)
+            if (sortDrag.active && sortingIndex < sortingItems.length) {
+                const item = sortingItems[sortingIndex];
+                ctx.shadowColor = 'rgba(0,0,0,0.6)';
+                ctx.shadowBlur = 20;
+                drawSortItemIcon(item.type, sortDrag.canvasX, sortDrag.canvasY, 2.8);
+                ctx.shadowBlur = 0;
+            }
+        }
+
+        function lightenColor(hex) {
+            const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+            return `rgb(${Math.min(255,r+60)},${Math.min(255,g+60)},${Math.min(255,b+60)})`;
+        }
+
+        function drawSortResult() {
+            ctx.fillStyle = '#0F172A';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.textAlign = 'center';
+
+            ctx.fillStyle = '#A855F7';
+            ctx.font = 'bold 52px Fredoka One, sans-serif';
+            ctx.fillText('SORTING COMPLETE!', canvas.width / 2, 88);
+
+            const total = sortingItems.length;
+            const accuracy = total > 0 ? Math.round((sortingCorrect / total) * 100) : 100;
+
+            let medal = '🥉'; let medalColor = '#CD7F32';
+            if (accuracy === 100) { medal = '🥇'; medalColor = '#FFD700'; }
+            else if (accuracy >= 70) { medal = '🥈'; medalColor = '#C0C0C0'; }
+
+            ctx.font = '60px sans-serif';
+            ctx.fillText(medal, canvas.width / 2, 168);
+
+            ctx.fillStyle = medalColor;
+            ctx.font = 'bold 34px Fredoka One, sans-serif';
+            ctx.fillText(`${accuracy}% Accuracy`, canvas.width / 2, 224);
+
+            ctx.fillStyle = '#22C55E'; ctx.font = '28px Fredoka One, sans-serif';
+            ctx.fillText(`✓ Correct: ${sortingCorrect}`, canvas.width / 2, 274);
+            ctx.fillStyle = '#EF4444';
+            const penaltyText = sortingWrong > 0 ? `✗ Wrong: ${sortingWrong}   (−${sortingWrong * 5}s penalty)` : `✗ Wrong: 0   (no penalty!)`;
+            ctx.fillText(penaltyText, canvas.width / 2, 314);
+            ctx.fillStyle = '#FFD700';
+            ctx.fillText(`Sorting Bonus: +${sortingScore} pts`, canvas.width / 2, 354);
+
+            ctx.fillStyle = '#fff'; ctx.font = '28px Fredoka One, sans-serif';
+            ctx.fillText(`Total Score: ${score}`, canvas.width / 2, 406);
+
+            ctx.fillStyle = '#94A3B8'; ctx.font = '22px Arial';
+            ctx.fillText('Press ENTER or tap Jump to play again', canvas.width / 2, 460);
+            ctx.textAlign = 'left';
+        }
+
+        // ============ END SORTING MINIGAME FUNCTIONS ============
+
+        function respawnPlayer() {
+            player.x = lastCheckpoint.x;
+            player.y = lastCheckpoint.y;
+            player.vx = 0;
+            player.vy = 0;
+            cameraX = Math.max(0, lastCheckpoint.x - 200);
+            invincible = true;
+            invincibleTimer = 120; // 2 seconds of invincibility
+        }
+
+        // Optimized background drawing with parallax
+        function drawBackground() {
+            // Draw pre-rendered static background
+            ctx.drawImage(backgroundCanvas, 0, 0);
+
+            // Clouds (parallax) - simplified
+            ctx.fillStyle = 'rgba(255,255,255,0.9)';
+            for (let i = 0; i < 5; i++) {
+                const cx = ((i * 250 + 100) - cameraX * 0.1) % (canvas.width + 200) - 100;
+                drawCloud(cx, 60 + i * 20);
+            }
+
+            // Ground base strip — fills the gap below the hill arcs
+            ctx.fillStyle = '#32CD32';
+            ctx.fillRect(0, canvas.height - 50, canvas.width, 50);
+
+            // Far hills (parallax)
+            ctx.fillStyle = '#90EE90';
+            for (let i = 0; i < 8; i++) {
+                const hx = ((i * 200) - cameraX * 0.2) % (canvas.width + 300) - 150;
+                ctx.beginPath();
+                ctx.arc(hx, canvas.height - 50, 150, Math.PI, 0);
+                ctx.fill();
+            }
+
+            // Near hills
+            ctx.fillStyle = '#32CD32';
+            for (let i = 0; i < 10; i++) {
+                const hx = ((i * 180 + 50) - cameraX * 0.4) % (canvas.width + 250) - 100;
+                ctx.beginPath();
+                ctx.arc(hx, canvas.height - 30, 100, Math.PI, 0);
+                ctx.fill();
+            }
+        }
+
+        function drawCloud(x, y) {
+            ctx.beginPath();
+            ctx.arc(x, y, 25, 0, TWO_PI);
+            ctx.arc(x + 25, y - 10, 30, 0, TWO_PI);
+            ctx.arc(x + 50, y, 25, 0, TWO_PI);
+            ctx.arc(x + 25, y + 10, 20, 0, TWO_PI);
+            ctx.fill();
+        }
+
+        function drawPlayer() {
+            const px = player.x - cameraX;
+            
+            // Blinking effect when invincible
+            if (invincible && Math.floor(invincibleTimer / 5) % 2 === 0) {
+                ctx.globalAlpha = 0.5;
+            }
+            
+            ctx.save();
+            ctx.translate(px, player.y);
+            ctx.rotate(player.rotation);
+            
+            // Ball body - PURPLE
+            ctx.fillStyle = player.color;
+            ctx.beginPath();
+            ctx.arc(0, 0, player.radius, 0, TWO_PI);
+            ctx.fill();
+            
+            // Darker purple outline
+            ctx.strokeStyle = player.strokeColor;
+            ctx.lineWidth = 3;
+            ctx.stroke();
+
+            // Smiley face
+            ctx.fillStyle = '#fff';
+            // Eyes
+            ctx.beginPath();
+            ctx.arc(-7, -5, 5, 0, TWO_PI);
+            ctx.arc(7, -5, 5, 0, TWO_PI);
+            ctx.fill();
+            
+            // Pupils
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(-7, -5, 2.5, 0, TWO_PI);
+            ctx.arc(7, -5, 2.5, 0, TWO_PI);
+            ctx.fill();
+            
+            // Smile
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(0, 2, 8, 0.3, Math.PI - 0.3);
+            ctx.stroke();
+            
+            ctx.restore();
+            ctx.globalAlpha = 1;
+        }
+
+        function drawPlatforms() {
+            const viewLeft = cameraX - 100;
+            const viewRight = cameraX + canvas.width + 100;
+            
+            platforms.forEach(p => {
+                if (p.x + p.w < viewLeft || p.x > viewRight) return;
+                
+                const px = p.x - cameraX;
+                
+                // Grass top
+                ctx.fillStyle = '#228B22';
+                ctx.fillRect(px, p.y, p.w, 10);
+                
+                // Dirt
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(px, p.y + 10, p.w, p.h - 10);
+                
+                // Moving platform indicator
+                if (p.moving) {
+                    ctx.fillStyle = '#FFD700';
+                    ctx.fillRect(px + 5, p.y + 2, p.w - 10, 6);
+                }
+            });
+        }
+
+        function drawSpikes() {
+            ctx.fillStyle = '#666';
+            const viewLeft = cameraX - 100;
+            const viewRight = cameraX + canvas.width + 100;
+            
+            spikes.forEach(s => {
+                if (s.x + s.w < viewLeft || s.x > viewRight) return;
+                
+                const sx = s.x - cameraX;
+                const spikeCount = Math.floor(s.w / 15);
+                for (let i = 0; i < spikeCount; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(sx + i * 15, s.y + s.h);
+                    ctx.lineTo(sx + i * 15 + 7.5, s.y);
+                    ctx.lineTo(sx + i * 15 + 15, s.y + s.h);
+                    ctx.fill();
+                }
+            });
+        }
+
+        // Cache bob value
+        let bobValue = 0;
+        
+        function drawCollectibles() {
+            const viewLeft = cameraX - 100;
+            const viewRight = cameraX + canvas.width + 100;
+            bobValue = Math.sin(performance.now() / 200) * 5;
+            
+            collectibles.forEach(c => {
+                if (c.collected) return;
+                if (c.x < viewLeft || c.x > viewRight) return;
+                
+                const cx = c.x - cameraX;
+                const bob = bobValue;
+                const yPos = c.y + bob;
+
+                // Simple Shadow
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.beginPath();
+                ctx.ellipse(cx, c.y + 25, 12, 4, 0, 0, TWO_PI);
+                ctx.fill();
+                
+                if (c.type === 'bottle') {
+                    ctx.save();
+                    ctx.translate(cx, yPos);
+                    // Plastic Bottle Body
+                    ctx.fillStyle = 'rgba(0, 206, 209, 0.8)'; 
+                    ctx.beginPath();
+                    ctx.rect(-10, -15, 20, 35);
+                    ctx.fill();
+                    ctx.strokeStyle = '#008B8B';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    
+                    // Label
+                    ctx.fillStyle = '#fff';
+                    ctx.fillRect(-10, -5, 20, 15);
+                    ctx.fillStyle = '#008B8B';
+                    ctx.beginPath();
+                    ctx.rect(-8, 0, 16, 5); // Simple label marking
+                    ctx.fill();
+                    
+                    // Neck
+                    ctx.fillStyle = 'rgba(0, 206, 209, 0.8)';
+                    ctx.fillRect(-5, -22, 10, 7);
+                    ctx.strokeRect(-5, -22, 10, 7);
+                    
+                    // Cap
+                    ctx.fillStyle = '#FF4500'; 
+                    ctx.fillRect(-7, -27, 14, 5);
+                    
+                    // Highlight
+                    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                    ctx.fillRect(4, -12, 3, 25);
+                    ctx.restore();
+
+                } else if (c.type === 'paper') {
+                    ctx.save();
+                    ctx.translate(cx, yPos);
+                    
+                    // Paper Sheet
+                    ctx.fillStyle = '#F5F5F5';
+                    ctx.beginPath();
+                    ctx.moveTo(-12, -18);
+                    ctx.lineTo(12, -18);
+                    ctx.lineTo(18, -12); // Fold
+                    ctx.lineTo(18, 18);
+                    ctx.lineTo(-18, 18);
+                    ctx.lineTo(-18, -12);
+                    ctx.closePath();
+                    ctx.fill();
+                    
+                    // Fold detail
+                    ctx.fillStyle = '#E0E0E0';
+                    ctx.beginPath();
+                    ctx.moveTo(12, -18);
+                    ctx.lineTo(12, -12);
+                    ctx.lineTo(18, -12);
+                    ctx.fill();
+                    
+                    ctx.strokeStyle = '#999';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    
+                    // Lines
+                    ctx.fillStyle = '#555';
+                    ctx.fillRect(-10, -5, 20, 2);
+                    ctx.fillRect(-10, 0, 20, 2);
+                    ctx.fillRect(-10, 5, 14, 2);
+                    
+                    // Green recycle hint
+                    ctx.fillStyle = '#4CAF50';
+                    ctx.font = '12px Arial';
+                    ctx.fillText('♻', -6, -8);
+                    ctx.restore();
+
+                } else if (c.type === 'clothes') {
+                    ctx.save();
+                    ctx.translate(cx, yPos);
+                    
+                    // T-Shirt Shape
+                    ctx.fillStyle = '#FF6B6B';
+                    ctx.strokeStyle = '#B22222';
+                    ctx.lineWidth = 2;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(-6, -20); 
+                    ctx.quadraticCurveTo(0, -15, 6, -20); // Neck
+                    ctx.lineTo(16, -18); // Shoulder
+                    ctx.lineTo(24, -8); // Sleeve
+                    ctx.lineTo(18, -4);
+                    ctx.lineTo(14, -8);
+                    ctx.lineTo(14, 18); // Side
+                    ctx.lineTo(-14, 18);
+                    ctx.lineTo(-14, -8);
+                    ctx.lineTo(-18, -4);
+                    ctx.lineTo(-24, -8); // Sleeve
+                    ctx.lineTo(-16, -18);
+                    ctx.closePath();
+                    
+                    ctx.fill();
+                    ctx.stroke();
+                    
+                    // Star design
+                    ctx.fillStyle = '#fff';
+                    ctx.font = '10px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('★', 0, 2);
+                    ctx.restore();
+                }
+            });
+        }
+
+        function drawEnemies() {
+            const viewLeft = cameraX - 50;
+            const viewRight = cameraX + canvas.width + 50;
+            
+            enemies.forEach(e => {
+                if (!e.active) return;
+                if (e.x < viewLeft || e.x > viewRight) return;
+                
+                const ex = e.x - cameraX;
+                const halfSize = e.size / 2;
+                
+                // Square enemy
+                ctx.fillStyle = '#FF4444';
+                ctx.fillRect(ex - halfSize, e.y - halfSize, e.size, e.size);
+                
+                // Evil face
+                ctx.fillStyle = '#000';
+                // Angry eyes
+                ctx.beginPath();
+                ctx.moveTo(ex - 10, e.y - 8);
+                ctx.lineTo(ex - 3, e.y - 3);
+                ctx.lineTo(ex - 10, e.y - 3);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.moveTo(ex + 10, e.y - 8);
+                ctx.lineTo(ex + 3, e.y - 3);
+                ctx.lineTo(ex + 10, e.y - 3);
+                ctx.fill();
+                
+                // Frown
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(ex, e.y + 15, 8, Math.PI + 0.3, -0.3);
+                ctx.stroke();
+            });
+        }
+
+        function drawCheckpoints() {
+            const viewLeft = cameraX - 50;
+            const viewRight = cameraX + canvas.width + 50;
+            
+            checkpoints.forEach(c => {
+                if (c.x < viewLeft || c.x > viewRight) return;
+                
+                const cx = c.x - cameraX;
+                
+                // Flag pole
+                ctx.fillStyle = '#666';
+                ctx.fillRect(cx - 3, c.y - 50, 6, 60);
+                
+                // Flag - changes to purple when activated
+                ctx.fillStyle = c.activated ? '#A855F7' : '#888';
+                ctx.beginPath();
+                ctx.moveTo(cx + 3, c.y - 50);
+                ctx.lineTo(cx + 35, c.y - 35);
+                ctx.lineTo(cx + 3, c.y - 20);
+                ctx.fill();
+                
+                if (c.activated) {
+                    ctx.fillStyle = '#fff';
+                    ctx.font = '14px Arial';
+                    ctx.fillText('♻', cx + 10, c.y - 32);
+                }
+            });
+        }
+
+        function drawGoalFlag() {
+            const fx = goalFlag.x - cameraX;
+            if (fx < -60 || fx > canvas.width + 60) return;
+            
+            // Pole
+            ctx.fillStyle = '#FFD700';
+            ctx.fillRect(fx, goalFlag.y, goalFlag.w, goalFlag.h);
+            
+            // Flag - purple to match player
+            ctx.fillStyle = '#A855F7';
+            ctx.beginPath();
+            ctx.moveTo(fx, goalFlag.y);
+            ctx.lineTo(fx + 50, goalFlag.y + 20);
+            ctx.lineTo(fx, goalFlag.y + 40);
+            ctx.fill();
+            
+            // Star on flag
+            ctx.fillStyle = '#FFD700';
+            ctx.font = 'bold 20px Arial';
+            ctx.fillText('★', fx + 15, goalFlag.y + 28);
+        }
+
+        function drawHUD() {
+            // Hearts
+            ctx.font = '28px Arial';
+            for (let i = 0; i < 3; i++) {
+                ctx.fillStyle = i < lives ? '#FF4444' : '#444';
+                ctx.fillText('♥', 20 + i * 35, 40);
+            }
+
+            // Score
+            ctx.fillStyle = '#fff';
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 3;
+            ctx.font = 'bold 24px Fredoka One, sans-serif';
+            ctx.strokeText(`Score: ${score}`, 20, 80);
+            ctx.fillText(`Score: ${score}`, 20, 80);
+
+            // Timer
+            const mins = Math.floor(timeLeft / 60);
+            const secs = timeLeft % 60;
+            const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+            ctx.fillStyle = timeLeft < 30 ? '#FF4444' : '#fff';
+            ctx.strokeText(`Time: ${timeStr}`, canvas.width - 150, 40);
+            ctx.fillText(`Time: ${timeStr}`, canvas.width - 150, 40);
+
+            // Control hints
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(canvas.width/2 - 130, canvas.height - 40, 260, 35);
+            ctx.fillStyle = '#fff';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('← → Move | ↑/Space Jump | P Pause', canvas.width/2, canvas.height - 18);
+            ctx.textAlign = 'left';
+        }
+
+        function drawCutscene() {
+            drawBackground();
+            
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+            
+            const raccoonX = 200;
+            const raccoonY = 380; 
+            
+            // Draw Ground for raccoon
+            ctx.fillStyle = '#228B22';
+            ctx.fillRect(0, 420, canvas.width, 80);
+            
+            // Animation Phases
+            let armAngle = 0;
+            let ballX = raccoonX + 20;
+            let ballY = raccoonY;
+            
+            // Phase logic based on frame
+            if (cutsceneFrame < 60) {
+                // Idle
+                armAngle = Math.PI / 4;
+                ballX = raccoonX + 30;
+                ballY = raccoonY + 10;
+            } else if (cutsceneFrame < 100) {
+                // Windup
+                const p = (cutsceneFrame - 60) / 40;
+                armAngle = Math.PI / 4 - p * (Math.PI * 0.8);
+                ballX = raccoonX + 30 - p * 40;
+                ballY = raccoonY + 10 - p * 10;
+            } else if (cutsceneFrame < 110) {
+                // Throw
+                const p = (cutsceneFrame - 100) / 10;
+                armAngle = -Math.PI * 0.6 + p * (Math.PI * 1.5);
+                ballX = raccoonX - 10 + p * 100;
+                ballY = raccoonY - p * 50;
+            } else {
+                // Follow through
+                armAngle = Math.PI * 0.9;
+            }
+
+            // Draw Raccoon
+            ctx.save();
+            ctx.translate(raccoonX, raccoonY + 40);
+            
+            // Tail
+            ctx.save();
+            ctx.translate(-30, 20);
+            ctx.rotate(Math.sin(cutsceneFrame * 0.2) * 0.1 - 0.5);
+            ctx.fillStyle = '#777';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 30, 10, 0, 0, TWO_PI);
+            ctx.fill();
+            ctx.fillStyle = '#333';
+            for(let i=1; i<4; i++) {
+                ctx.beginPath();
+                ctx.ellipse(-15 + i*10, 0, 5, 10, 0, 0, TWO_PI);
+                ctx.fill();
+            }
+            ctx.restore();
+
+            // Body
+            ctx.translate(0, -40);
+            ctx.fillStyle = '#666';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 45, 35, 0, 0, TWO_PI);
+            ctx.fill();
+            
+            // Belly
+            ctx.fillStyle = '#999';
+            ctx.beginPath();
+            ctx.ellipse(0, 5, 25, 20, 0, 0, TWO_PI);
+            ctx.fill();
+
+            // Head
+            ctx.translate(0, -35);
+            ctx.fillStyle = '#666';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 35, 25, 0, 0, TWO_PI);
+            ctx.fill();
+            
+            // Ears
+            ctx.fillStyle = '#444';
+            ctx.beginPath();
+            ctx.moveTo(-20, -15);
+            ctx.lineTo(-30, -35);
+            ctx.lineTo(-10, -25);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(20, -15);
+            ctx.lineTo(30, -35);
+            ctx.lineTo(10, -25);
+            ctx.fill();
+            
+            // Mask
+            ctx.fillStyle = '#222';
+            ctx.beginPath();
+            ctx.ellipse(0, -2, 28, 12, 0, 0, TWO_PI);
+            ctx.fill();
+            
+            // Eyes
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(-10, 2, 4, 0, TWO_PI);
+            ctx.arc(10, 2, 4, 0, TWO_PI);
+            ctx.fill();
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(-10 + Math.sin(cutsceneFrame*0.1), 2, 2, 0, TWO_PI);
+            ctx.arc(10 + Math.sin(cutsceneFrame*0.1), 2, 2, 0, TWO_PI);
+            ctx.fill();
+            
+            // Nose
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(0, 10, 4, 0, TWO_PI);
+            ctx.fill();
+
+            ctx.restore(); 
+            
+            // Arm (separate for rotation)
+            ctx.save();
+            ctx.translate(raccoonX, raccoonY - 5);
+            ctx.rotate(armAngle);
+            ctx.fillStyle = '#666';
+            ctx.beginPath();
+            ctx.rect(0, -8, 40, 16); 
+            ctx.fill();
+            ctx.fillStyle = '#222'; 
+            ctx.beginPath();
+            ctx.arc(40, 0, 10, 0, TWO_PI);
+            ctx.fill();
+            ctx.restore();
+
+            // Ball Logic
+            if (cutsceneFrame < 110) {
+                // Held
+                drawCutsceneBall(ballX, ballY);
+            } else {
+                // Flying
+                const flightTime = cutsceneFrame - 110;
+                const speedX = 15;
+                const speedY = -15;
+                const gravity = 0.8;
+                
+                const flyX = (raccoonX + 40) + speedX * flightTime;
+                const flyY = (raccoonY - 20) + speedY * flightTime + 0.5 * gravity * flightTime * flightTime;
+                
+                drawCutsceneBall(flyX, flyY);
+                
+                if (flightTime < 20) {
+                    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+                    ctx.lineWidth = 5;
+                    ctx.beginPath();
+                    ctx.moveTo(flyX - 40, flyY + 30);
+                    ctx.lineTo(flyX - 10, flyY + 10);
+                    ctx.stroke();
+                }
+            }
+
+            // Title and UI
+            if (cutsceneFrame > 20) {
+                ctx.save();
+                ctx.globalAlpha = Math.min((cutsceneFrame - 20) / 40, 1);
+                
+                // Title
+                ctx.shadowColor = 'rgba(0,0,0,0.5)';
+                ctx.shadowBlur = 10;
+                ctx.fillStyle = '#A855F7';
+                ctx.font = 'bold 70px Fredoka One, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('RECYCLE RUSH', canvas.width/2, 120);
+                
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 3;
+                ctx.strokeText('RECYCLE RUSH', canvas.width/2, 120);
+                
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = '#fff';
+                ctx.font = '24px Fredoka One, sans-serif';
+                ctx.fillText('Help Raccoony clean up the world!', canvas.width/2, 450);
+                
+                if (Math.floor(cutsceneFrame / 30) % 2 === 0) {
+                    ctx.fillStyle = '#FFD700';
+                    ctx.font = '20px Arial';
+                    ctx.fillText('Press ENTER or tap Jump to Start', canvas.width/2, 480);
+                }
+                ctx.restore();
+            }
+
+            cutsceneFrame++;
+            if (cutsceneFrame > 250) {
+                cutsceneFrame = 0; 
+            }
+        }
+
+        function drawCutsceneBall(x, y) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(cutsceneFrame * 0.2); 
+            
+            ctx.fillStyle = '#A855F7';
+            ctx.beginPath();
+            ctx.arc(0, 0, 25, 0, TWO_PI);
+            ctx.fill();
+            ctx.strokeStyle = '#7C3AED';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            
+            // Face
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(-7, -5, 6, 0, TWO_PI);
+            ctx.arc(7, -5, 6, 0, TWO_PI);
+            ctx.fill();
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(-7, -5, 3, 0, TWO_PI);
+            ctx.arc(7, -5, 3, 0, TWO_PI);
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(0, 2, 10, 0.3, Math.PI - 0.3);
+            ctx.stroke();
+            
+            ctx.restore();
+        }
+
+        function drawPauseScreen() {
+            ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#A855F7';
+            ctx.font = 'bold 48px Fredoka One, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('PAUSED', canvas.width/2, canvas.height/2 - 30);
+            
+            ctx.fillStyle = '#fff';
+            ctx.font = '24px Arial';
+            ctx.fillText('Press P or ESC to resume', canvas.width/2, canvas.height/2 + 30);
+            ctx.textAlign = 'left';
+        }
+
+        function drawGameOver() {
+            ctx.fillStyle = 'rgba(0,0,0,0.8)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = '#FF4444';
+            ctx.font = 'bold 60px Fredoka One, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('GAME OVER', canvas.width/2, canvas.height/2 - 50);
+
+            ctx.fillStyle = '#fff';
+            ctx.font = '28px Fredoka One, sans-serif';
+            ctx.fillText(`Final Score: ${score}`, canvas.width/2, canvas.height/2 + 10);
+
+            ctx.font = '22px Arial';
+            ctx.fillText('Press ENTER or tap Jump to try again', canvas.width/2, canvas.height/2 + 60);
+            ctx.textAlign = 'left';
+
+            // Send score to parent window on game over
+            if (!drawGameOver._sentScore) {
+                window.parent.postMessage({ type: 'score', value: score }, '*');
+                drawGameOver._sentScore = true;
+            }
+        }
+
+        function drawVictory() {
+            ctx.fillStyle = 'rgba(0,0,0,0.8)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = '#A855F7';
+            ctx.font = 'bold 60px Fredoka One, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('LEVEL COMPLETE!', canvas.width/2, canvas.height/2 - 80);
+
+            const collected = collectibles.filter(c => c.collected).length;
+            ctx.fillStyle = '#FFD700';
+            ctx.font = '32px Fredoka One, sans-serif';
+            ctx.fillText(`♻ Items Collected: ${collected}/${collectibles.length}`, canvas.width/2, canvas.height/2 - 20);
+
+            ctx.fillStyle = '#fff';
+            ctx.font = '28px Fredoka One, sans-serif';
+            ctx.fillText(`Final Score: ${score}`, canvas.width/2, canvas.height/2 + 30);
+            ctx.fillText(`Time Remaining: ${Math.floor(timeLeft/60)}:${(timeLeft%60).toString().padStart(2,'0')}`, canvas.width/2, canvas.height/2 + 70);
+
+            ctx.font = '22px Arial';
+            ctx.fillText('Press ENTER or tap Jump to sort!', canvas.width/2, canvas.height/2 + 120);
+            ctx.textAlign = 'left';
+
+            // Send score to parent window on victory screen
+            // if (!drawVictory._sentScore) {
+            //     window.parent.postMessage({ type: 'score', value: score }, '*');
+            //     drawVictory._sentScore = true;
+            // }
+        }
+
+        function update(dt) {
+            if (gameState !== STATES.PLAYING) return;
+
+            // Invincibility timer
+            if (invincible) {
+                invincibleTimer -= dt;
+                if (invincibleTimer <= 0) {
+                    invincible = false;
+                }
+            }
+
+            // Player movement with smoother acceleration
+            const acceleration = 0.8;
+            const maxSpeed = 6;
+            const friction = 0.88;
+            
+            if (keys.left) {
+                player.vx -= acceleration * dt;
+                if (player.vx < -maxSpeed) player.vx = -maxSpeed;
+            } else if (keys.right) {
+                player.vx += acceleration * dt;
+                if (player.vx > maxSpeed) player.vx = maxSpeed;
+            } else {
+                player.vx *= Math.pow(friction, dt);
+                if (Math.abs(player.vx) < 0.1) player.vx = 0;
+            }
+
+            // Gravity
+            player.vy += 0.55 * dt;
+            if (player.vy > 15) player.vy = 15; // Terminal velocity
+            
+            // Apply velocity
+            player.x += player.vx * dt;
+            player.y += player.vy * dt;
+            
+            // Ball rotation based on movement
+            player.rotation += player.vx * 0.05 * dt;
+
+            // Update moving platforms
+            platforms.forEach(p => {
+                if (p.moving) {
+                    const step = p.speed * p.dir * dt;
+                    if (p.axis === 'y') {
+                        p.y += step;
+                        if (p.y > p.origY + p.moveRange || p.y < p.origY - p.moveRange) p.dir *= -1;
+                    } else {
+                        p.x += step;
+                        if (p.x > p.origX + p.moveRange || p.x < p.origX - p.moveRange) p.dir *= -1;
+                    }
+                }
+            });
+
+            // Update enemies
+            enemies.forEach(e => {
+                if (!e.active) return;
+                e.x += e.vx * dt;
+                if (e.x > e.origX + e.range || e.x < e.origX - e.range) e.vx *= -1;
+            });
+
+            // Platform collision
+            player.grounded = false;
+            platforms.forEach(p => {
+                if (player.x + player.radius > p.x && player.x - player.radius < p.x + p.w) {
+                    // Top collision
+                    if (player.y + player.radius > p.y && player.y + player.radius < p.y + 25 && player.vy > 0) {
+                        player.y = p.y - player.radius;
+                        player.vy = 0;
+                        player.grounded = true;
+                        
+                        if (p.moving && p.axis === 'x') {
+                            player.x += p.speed * p.dir * dt;
+                        }
+                    }
+                    // Side collision
+                    else if (player.y + player.radius > p.y + 5 && player.y - player.radius < p.y + p.h) {
+                        if (player.vx > 0 && player.x - player.radius < p.x) {
+                            player.x = p.x - player.radius;
+                            player.vx = 0;
+                        } else if (player.vx < 0 && player.x + player.radius > p.x + p.w) {
+                            player.x = p.x + p.w + player.radius;
+                            player.vx = 0;
+                        }
+                    }
+                }
+            });
+
+            // Spike collision
+            if (!invincible) {
+                for (const s of spikes) {
+                    if (player.x + player.radius > s.x && player.x - player.radius < s.x + s.w &&
+                        player.y + player.radius > s.y) {
+                        hurtPlayer();
+                        break;
+                    }
+                }
+            }
+
+            // Enemy collision
+            if (!invincible) {
+                for (const e of enemies) {
+                    if (!e.active) continue;
+                    const dx = player.x - e.x;
+                    const dy = player.y - e.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    if (dist < player.radius + e.size/2) {
+                        if (player.vy > 0 && player.y < e.y - e.size/4) {
+                            player.vy = -11;
+                            e.active = false;
+                            score += 50;
+                            playCollectSound();
+                        } else {
+                            hurtPlayer();
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Collectible collision
+            const collectRadius = player.radius + 18;
+            for (const c of collectibles) {
+                if (c.collected) continue;
+                const dx = player.x - c.x;
+                const dy = player.y - c.y;
+                if (dx*dx + dy*dy < collectRadius * collectRadius) {
+                    c.collected = true;
+                    score += 100;
+                    playCollectSound();
+                }
+            }
+
+            // Checkpoint collision
+            for (const c of checkpoints) {
+                if (!c.activated && Math.abs(player.x - c.x) < 30 && player.y > c.y - 50) {
+                    c.activated = true;
+                    lastCheckpoint = { x: c.x, y: c.y - 30 };
+                    playCollectSound();
+                    break;
+                }
+            }
+
+            // Goal collision
+            if (player.x > goalFlag.x - 20 && player.x < goalFlag.x + 30) {
+                gameState = STATES.VICTORY;
+                playVictorySound();
+            }
+
+            // Fall off screen
+            if (player.y > canvas.height + 50) {
+                hurtPlayer();
+            }
+
+            // Smooth camera follow
+            const targetCameraX = player.x - canvas.width / 3;
+            cameraX += (targetCameraX - cameraX) * 0.08;
+            cameraX = Math.max(0, Math.min(cameraX, 3500));
+        }
+
+        function hurtPlayer() {
+            if (invincible) return;
+            lives--;
+            playHurtSound();
+            if (lives <= 0) {
+                gameState = STATES.GAMEOVER;
+            } else {
+                respawnPlayer();
+            }
+        }
+
+        function gameLoop(currentTime) {
+            deltaTime = currentTime - lastFrameTime;
+            
+            // Cap delta time to prevent huge jumps
+            if (deltaTime > 50) deltaTime = 50;
+            
+            const dt = deltaTime / frameTime;
+            lastFrameTime = currentTime;
+
+
+            if (gameState === STATES.CUTSCENE) {
+                drawCutscene();
+            } else if (gameState === STATES.SORTING) {
+                drawSortingMinigame(dt);
+            } else if (gameState === STATES.SORT_RESULT) {
+                drawSortResult();
+            } else {
+                drawBackground();
+                drawPlatforms();
+                drawSpikes();
+                drawCollectibles();
+                drawCheckpoints();
+                drawGoalFlag();
+                drawEnemies();
+                drawPlayer();
+                drawHUD();
+
+                if (gameState === STATES.PLAYING) {
+                    // Reset sentScore flags if returning to play
+                    drawGameOver._sentScore = false;
+                    drawVictory._sentScore = false;
+                    update(dt);
+                } else if (gameState === STATES.PAUSED) {
+                    drawPauseScreen();
+                } else if (gameState === STATES.GAMEOVER) {
+                    drawGameOver();
+                } else if (gameState === STATES.VICTORY) {
+                    drawVictory();
+                }
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Mobile controls
+        // Mobile controls with Joystick
+        function addMobileControls() {
+            // Remove existing if any
+            const existing = document.getElementById('mobileControls');
+            if (existing) existing.remove();
+
+            const controlsDiv = document.createElement('div');
+            controlsDiv.id = 'mobileControls';
+            controlsDiv.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:100;';
+            
+            // Joystick wrapper - Bottom Left
+            const joystickZone = document.createElement('div');
+            joystickZone.style.cssText = 'position:absolute;bottom:40px;left:40px;width:120px;height:120px;pointer-events:auto;';
+            
+            // Joystick Base
+            const base = document.createElement('div');
+            base.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(255,255,255,0.1);border-radius:50%;border:2px solid rgba(255,255,255,0.3);box-sizing:border-box;';
+            
+            // Stick
+            const stick = document.createElement('div');
+            stick.style.cssText = 'position:absolute;top:50%;left:50%;width:50px;height:50px;background:rgba(168, 85, 247, 0.8);border-radius:50%;transform:translate(-50%, -50%);transition: transform 0.05s;box-shadow: 0 4px 6px rgba(0,0,0,0.3);';
+            
+            joystickZone.appendChild(base);
+            joystickZone.appendChild(stick);
+            
+            // Jump Button - Bottom Right
+            const jumpBtn = document.createElement('button');
+            jumpBtn.innerHTML = '↑';
+            jumpBtn.style.cssText = 'position:absolute;bottom:50px;right:50px;width:90px;height:90px;border-radius:50%;background:rgba(124, 58, 237, 0.8);border:4px solid rgba(255,255,255,0.3);color:white;font-size:40px;font-weight:bold;pointer-events:auto;touch-action:manipulation;user-select:none;-webkit-user-select:none;box-shadow: 0 4px 6px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;padding-bottom:10px;';
+            
+            controlsDiv.appendChild(joystickZone);
+            controlsDiv.appendChild(jumpBtn);
+            document.body.appendChild(controlsDiv);
+
+            // Joystick Logic
+            let startX = 0;
+            let currentX = 0;
+            let touchId = null;
+            const maxDist = 35; // Max stick movement radius
+
+            const handleStart = (e) => {
+                e.preventDefault();
+                initAudio();
+                const touch = e.changedTouches[0];
+                touchId = touch.identifier;
+                startX = touch.clientX;
+                currentX = startX;
+                stick.style.transition = 'none';
+                updateJoystick();
+            };
+
+            const handleMove = (e) => {
+                e.preventDefault();
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    if (e.changedTouches[i].identifier === touchId) {
+                        currentX = e.changedTouches[i].clientX;
+                        updateJoystick();
+                        break;
+                    }
+                }
+            };
+
+            const handleEnd = (e) => {
+                e.preventDefault();
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    if (e.changedTouches[i].identifier === touchId) {
+                        touchId = null;
+                        startX = 0;
+                        currentX = 0;
+                        stick.style.transition = 'transform 0.1s';
+                        stick.style.transform = `translate(-50%, -50%)`;
+                        keys.left = false;
+                        keys.right = false;
+                        break;
+                    }
+                }
+            };
+
+            joystickZone.addEventListener('touchstart', handleStart, {passive: false});
+            joystickZone.addEventListener('touchmove', handleMove, {passive: false});
+            joystickZone.addEventListener('touchend', handleEnd);
+            joystickZone.addEventListener('touchcancel', handleEnd);
+
+            function updateJoystick() {
+                let diff = currentX - startX;
+                // Clamp
+                if (diff > maxDist) diff = maxDist;
+                if (diff < -maxDist) diff = -maxDist;
+                
+                // Visual update
+                stick.style.transform = `translate(calc(-50% + ${diff}px), -50%)`;
+                
+                // Key update (deadzone of 10)
+                if (diff < -10) { 
+                    keys.left = true; 
+                    keys.right = false; 
+                } else if (diff > 10) { 
+                    keys.right = true; 
+                    keys.left = false; 
+                } else { 
+                    keys.left = false; 
+                    keys.right = false; 
+                }
+            }
+
+            // Jump Logic
+            const doJump = (e) => {
+                e.preventDefault();
+                initAudio();
+                
+                if (e.type === 'touchstart') {
+                    // Visual feedback
+                    jumpBtn.style.transform = 'scale(0.95)';
+                    jumpBtn.style.background = 'rgba(109, 40, 217, 0.9)';
+                } else {
+                    jumpBtn.style.transform = 'scale(1)';
+                    jumpBtn.style.background = 'rgba(124, 58, 237, 0.8)';
+                }
+
+                if (gameState === STATES.CUTSCENE) gameState = STATES.PLAYING;
+                else if (player.grounded && gameState === STATES.PLAYING) {
+                    player.vy = -13;
+                    player.grounded = false;
+                    playJumpSound();
+                }
+                else if (gameState === STATES.GAMEOVER) resetGame();
+                else if (gameState === STATES.VICTORY) initSortingMinigame();
+                else if (gameState === STATES.SORT_RESULT) resetGame();
+            };
+
+            jumpBtn.addEventListener('touchstart', doJump, {passive: false});
+            jumpBtn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                jumpBtn.style.transform = 'scale(1)';
+                jumpBtn.style.background = 'rgba(124, 58, 237, 0.8)';
+            }, {passive: false});
+            
+            // Also enable jump key flag if needed, but simple event is enough for jump 'trigger'
+            // For continuous jumping (holding it down), we might need to update keys.up
+            // But this game uses impulse jump.
+            
+            // Add P for pause button somewhere top right?
+            const pauseBtn = document.createElement('button');
+            pauseBtn.innerHTML = '❚❚';
+            pauseBtn.style.cssText = 'position:absolute;top:20px;right:20px;width:50px;height:50px;border-radius:50%;background:rgba(0,0,0,0.5);border:2px solid rgba(255,255,255,0.3);color:white;font-size:20px;pointer-events:auto;z-index:101;';
+            pauseBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if (gameState === STATES.PLAYING) gameState = STATES.PAUSED;
+                else if (gameState === STATES.PAUSED) gameState = STATES.PLAYING;
+            });
+            controlsDiv.appendChild(pauseBtn);
+        }
+
+        // Initialize
+        createBackgroundBuffer();
+        startTimer();
+        
+        // Auto-detect and add controls
+        if ('ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 1000) {
+            addMobileControls();
+        }
+
+        // Handle window resize to keep canvas scaled nicely
+        window.addEventListener('resize', () => {
+            // Check orientation
+            if (window.innerHeight > window.innerWidth) {
+                // Portrait
+            } else {
+                // Landscape
+                if (window.innerWidth < 1000) {
+                     // Ensure controls are present if resizing down to mobile size
+                     if (!document.getElementById('mobileControls')) addMobileControls();
+                }
+            }
+        });
+
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>

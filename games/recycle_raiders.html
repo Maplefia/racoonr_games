@@ -1,0 +1,1939 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Recycle Raiders</title>
+    <style>
+        :root {
+            --font-main: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            --primary-color: #4ade80;
+            --danger-color: #ef4444;
+            --ui-bg: rgba(30, 41, 59, 0.95);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #0f172a;
+            color: white;
+            font-family: var(--font-main);
+            touch-action: none;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+
+        .hud {
+            position: absolute;
+            top: 3.5rem;
+            left: 1rem;
+            display: flex;
+            gap: 1rem;
+            pointer-events: none;
+        }
+
+        .hud-item {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(139, 92, 246, 0.3));
+            border: 2px solid rgba(139, 92, 246, 0.5);
+            padding: 0.5rem 1rem;
+            border-radius: 1rem;
+            font-weight: bold;
+            font-size: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+
+        /* Finish Button */
+        #finishBtn {
+            position: absolute;
+            bottom: 2.5rem;
+            right: 1.5rem;
+            max-width: 120px;
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.3), rgba(220, 38, 38, 0.3));
+            border: 2px solid rgba(239, 68, 68, 0.6);
+            color: white;
+            padding: 0.5rem 1.2rem;
+            border-radius: 1rem;
+            font-weight: bold;
+            font-size: 1rem;
+            cursor: pointer;
+            pointer-events: auto;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.2);
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            z-index: 20;
+        }
+
+        #finishBtn:hover {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.5), rgba(220, 38, 38, 0.5));
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4);
+        }
+
+        #finishBtn:active {
+            transform: translateY(0);
+        }
+
+        /* Sound Toggle Button */
+        #soundBtn {
+            position: absolute;
+            top: 3.5rem;
+            right: 10rem;
+            background: linear-gradient(135deg, rgba(74, 222, 128, 0.25), rgba(34, 211, 238, 0.25));
+            border: 2px solid rgba(74, 222, 128, 0.5);
+            color: white;
+            padding: 0.5rem 0.9rem;
+            border-radius: 1rem;
+            font-weight: bold;
+            font-size: 1.1rem;
+            cursor: pointer;
+            pointer-events: auto;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 4px 15px rgba(74, 222, 128, 0.2);
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            z-index: 20;
+        }
+
+        #soundBtn:hover {
+            background: linear-gradient(135deg, rgba(74, 222, 128, 0.45), rgba(34, 211, 238, 0.45));
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(74, 222, 128, 0.4);
+        }
+
+        #soundBtn:active {
+            transform: translateY(0);
+        }
+
+        @media (max-width: 480px) {
+            .hud {
+                gap: 0.4rem;
+                top: 3.5rem;
+                left: 0.5rem;
+                max-width: calc(100% - 110px);
+                flex-wrap: wrap;
+            }
+            .hud-item {
+                font-size: 0.8rem;
+                padding: 0.3rem 0.5rem;
+                border-radius: 0.6rem;
+                gap: 0.3rem;
+            }
+            #finishBtn {
+                bottom: 1.5rem;
+                right: 1.5rem;
+                font-size: 0.75rem;
+                padding: 0.3rem 0.6rem;
+                gap: 0.2rem;
+                max-width: 90px;
+            }
+            #soundBtn {
+                top: 3.5rem;
+                right: 120px;
+                font-size: 0.9rem;
+                padding: 0.3rem 0.5rem;
+            }
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .menu-card {
+            background: linear-gradient(145deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98));
+            padding: 2rem;
+            border-radius: 1.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 
+                        0 0 40px rgba(139, 92, 246, 0.15),
+                        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            border: 2px solid;
+            border-image: linear-gradient(135deg, rgba(74, 222, 128, 0.5), rgba(59, 130, 246, 0.5), rgba(236, 72, 153, 0.5)) 1;
+            max-width: 500px;
+            width: 90%;
+            text-align: center;
+            pointer-events: auto;
+            backdrop-filter: blur(10px);
+            animation: popIn 0.3s ease-out;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .menu-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -50%;
+            width: 200%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.03), transparent);
+            animation: shimmer 3s infinite;
+            pointer-events: none;
+        }
+
+        @keyframes shimmer {
+            0% { transform: translateX(-50%); }
+            100% { transform: translateX(50%); }
+        }
+
+        @keyframes popIn {
+            from { transform: scale(0.9); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+
+        @keyframes celebrationPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #4ade80, #22d3ee, #a855f7, #ec4899);
+            background-size: 200% 200%;
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            font-weight: 900;
+            animation: gradientShift 4s ease infinite;
+            text-shadow: 0 0 30px rgba(74, 222, 128, 0.3);
+        }
+
+        @keyframes gradientShift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+
+        h2 {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #f472b6, #c084fc);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            font-weight: 800;
+        }
+
+        .well-done-title {
+            font-size: 2.8rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #fbbf24, #f59e0b, #4ade80, #22d3ee);
+            background-size: 200% 200%;
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            font-weight: 900;
+            animation: gradientShift 3s ease infinite, celebrationPulse 2s ease-in-out infinite;
+        }
+
+        p {
+            color: #cbd5e1;
+            margin-bottom: 1.5rem;
+            line-height: 1.5;
+        }
+
+        .score-display {
+            font-size: 4rem;
+            font-weight: 900;
+            margin: 0.5rem 0;
+            background: linear-gradient(135deg, #fbbf24, #f97316);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            text-shadow: none;
+        }
+
+        .score-label {
+            color: #94a3b8;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            margin-bottom: 1.5rem;
+        }
+
+        .confetti-emoji {
+            font-size: 2.5rem;
+            display: block;
+            margin-bottom: 0.5rem;
+            animation: celebrationPulse 1s ease-in-out infinite;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #4ade80, #22d3ee);
+            color: #022c22;
+            border: none;
+            padding: 1rem 2rem;
+            font-size: 1.25rem;
+            font-weight: bold;
+            border-radius: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+            margin-top: 1rem;
+            box-shadow: 0 4px 15px rgba(74, 222, 128, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+            transition: left 0.5s;
+            pointer-events: none;
+        }
+
+        .btn:hover::before {
+            left: 100%;
+        }
+
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(74, 222, 128, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .settings-section {
+            margin-bottom: 1.5rem;
+            text-align: left;
+        }
+
+        .settings-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: bold;
+            background: linear-gradient(90deg, #f472b6, #c084fc);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .options-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.5rem;
+        }
+
+        .option-btn {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+            border: 2px solid rgba(139, 92, 246, 0.2);
+            color: #cbd5e1;
+            padding: 0.6rem;
+            border-radius: 0.75rem;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .option-btn:hover {
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(59, 130, 246, 0.2));
+            border-color: rgba(139, 92, 246, 0.4);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
+        }
+
+        .option-btn.selected {
+            background: linear-gradient(135deg, rgba(74, 222, 128, 0.3), rgba(34, 211, 238, 0.3));
+            border-color: #4ade80;
+            color: white;
+            box-shadow: 0 0 20px rgba(74, 222, 128, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+
+        .color-grid {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.5rem;
+        }
+
+        .color-option {
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 3px solid transparent;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .color-option:hover {
+            transform: scale(1.15);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+        }
+
+        .color-option.selected {
+            border-color: white;
+            transform: scale(1.2);
+            box-shadow: 0 0 20px currentColor;
+        }
+
+        .info-btn {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(139, 92, 246, 0.3));
+            border: 2px solid rgba(139, 92, 246, 0.5);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.75rem;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: all 0.3s;
+            margin-top: 1rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .info-btn:hover {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.5), rgba(139, 92, 246, 0.5));
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
+        }
+
+        .info-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            backdrop-filter: blur(5px);
+        }
+
+        .info-content {
+            background: linear-gradient(145deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98));
+            padding: 2rem;
+            border-radius: 1.5rem;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            border: 2px solid rgba(139, 92, 246, 0.3);
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+        }
+
+        .info-content h2 {
+            background: linear-gradient(135deg, #4ade80, #22d3ee);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            margin-bottom: 1.5rem;
+            text-align: center;
+        }
+
+        .location-info {
+            margin-bottom: 1.5rem;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 0.75rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .location-info h3 {
+            color: #c084fc;
+            margin-bottom: 0.75rem;
+            font-size: 1.1rem;
+        }
+
+        .items-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.5rem;
+            gap: 0.5rem;
+        }
+
+        .items-label {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            width: 100px;
+        }
+
+        .items-label.recycle { color: #4ade80; }
+        .items-label.trash { color: #ef4444; }
+
+        .items-emojis {
+            font-size: 1.5rem;
+            display: flex;
+            gap: 0.25rem;
+        }
+
+        .info-notes {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            background: linear-gradient(135deg, rgba(251, 191, 36, 0.1), rgba(245, 158, 11, 0.1));
+            border-radius: 0.75rem;
+            border-left: 4px solid #fbbf24;
+        }
+
+        .info-notes h4 {
+            color: #fbbf24;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .info-notes ul {
+            color: #cbd5e1;
+            font-size: 0.85rem;
+            padding-left: 1.25rem;
+            margin: 0;
+        }
+
+        .info-notes li { margin-bottom: 0.3rem; }
+
+        .close-btn {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            color: white;
+            border: none;
+            padding: 0.75rem 2rem;
+            border-radius: 0.75rem;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 1.5rem;
+            width: 100%;
+            transition: all 0.2s;
+        }
+
+        .close-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- HUD -->
+    <div id="hud" class="hud hidden">
+        <div class="hud-item">
+            <span>🏆</span> <span id="scoreDisplay">0</span>
+        </div>
+        <div class="hud-item">
+            <span id="livesDisplay">❤️❤️❤️</span>
+        </div>
+        <div class="hud-item">
+            <span>⚙️</span> <span id="levelDisplay">Easy</span>
+        </div>
+    </div>
+
+    <!-- Finish Button (visible during gameplay) -->
+    <button id="finishBtn" class="hidden" onclick="finishGame()">🏁 Finish</button>
+
+    <!-- Sound Toggle Button (always visible) -->
+    <button id="soundBtn" class="hidden" onclick="toggleSound()">🔊</button>
+
+    <!-- Start Menu -->
+    <div id="startMenu" class="ui-layer">
+        <div class="menu-card">
+            <h1>Recycle Raiders</h1>
+            <p>Sort the trash! Let recyclables fall into the bin. Zap non-recyclables with your laser!</p>
+
+            <div class="settings-section">
+                <span class="settings-label">Difficulty</span>
+                <div class="options-grid">
+                    <button class="option-btn selected" onclick="selectDifficulty('easy', this)">Easy</button>
+                    <button class="option-btn" onclick="selectDifficulty('medium', this)">Medium</button>
+                    <button class="option-btn" onclick="selectDifficulty('hard', this)">Hard</button>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <span class="settings-label">Location</span>
+                <div class="options-grid">
+                    <button class="option-btn selected" onclick="selectLocation('galaxy', this)">Galaxy</button>
+                    <button class="option-btn" onclick="selectLocation('pizza', this)">Pizza Place</button>
+                    <button class="option-btn" onclick="selectLocation('school', this)">School</button>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <span class="settings-label">Laser Color</span>
+                <div class="color-grid" id="colorContainer"></div>
+            </div>
+
+            <button class="btn" onclick="startGame()">Start Game</button>
+            <button class="info-btn" onclick="showInfo()">ℹ️ What Can I Recycle?</button>
+        </div>
+    </div>
+
+    <!-- Info Modal -->
+    <div id="infoModal" class="info-modal hidden">
+        <div class="info-content">
+            <h2>♻️ Recycling Guide</h2>
+            
+            <div class="location-info">
+                <h3>🌌 Galaxy Station</h3>
+                <div class="items-row">
+                    <span class="items-label recycle">✅ Recycle:</span>
+                    <span class="items-emojis" id="galaxyRecycle"></span>
+                </div>
+                <div class="items-row">
+                    <span class="items-label trash">❌ Trash:</span>
+                    <span class="items-emojis" id="galaxyTrash"></span>
+                </div>
+            </div>
+            
+            <div class="location-info">
+                <h3>🍕 Pizza Place</h3>
+                <div class="items-row">
+                    <span class="items-label recycle">✅ Recycle:</span>
+                    <span class="items-emojis" id="pizzaRecycle"></span>
+                </div>
+                <div class="items-row">
+                    <span class="items-label trash">❌ Trash:</span>
+                    <span class="items-emojis" id="pizzaTrash"></span>
+                </div>
+            </div>
+            
+            <div class="location-info">
+                <h3>🏫 School</h3>
+                <div class="items-row">
+                    <span class="items-label recycle">✅ Recycle:</span>
+                    <span class="items-emojis" id="schoolRecycle"></span>
+                </div>
+                <div class="items-row">
+                    <span class="items-label trash">❌ Trash:</span>
+                    <span class="items-emojis" id="schoolTrash"></span>
+                </div>
+            </div>
+            
+            <div class="info-notes">
+                <h4>💡 Remember!</h4>
+                <ul>
+                    <li>Containers contaminated with food/grease cannot be recycled.</li>
+                    <li>Rinse bottles and cans before recycling.</li>
+                    <li>When in doubt, check your local recycling guidelines.</li>
+                </ul>
+            </div>
+            
+            <button class="close-btn" onclick="hideInfo()">Got It!</button>
+        </div>
+    </div>
+
+    <!-- Game Over Menu -->
+    <div id="gameOverMenu" class="ui-layer hidden">
+        <div class="menu-card">
+            <h2>Game Over</h2>
+            <p>The bin is contaminated!</p>
+            <div class="score-display" id="finalScore">0</div>
+            <p class="score-label">Score</p>
+            <button class="btn" onclick="resetGame()">Play Again</button>
+        </div>
+    </div>
+
+    <!-- Well Done Menu -->
+    <div id="wellDoneMenu" class="ui-layer hidden">
+        <div class="menu-card">
+            <span class="confetti-emoji">🎉</span>
+            <div class="well-done-title">Well Done!</div>
+            <p>Great recycling work, Raider!</p>
+            <div class="score-display" id="wellDoneScore">0</div>
+            <p class="score-label">Final Score</p>
+            <button class="btn" onclick="resetGame()">🔄 Play Again?</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ── MUSIC ENGINE ──────────────────────────────────────────────────────────
+    let audioCtx = null;
+    let musicNodes = [];
+    let musicOn = true;
+    let musicStarted = false;
+
+    function getAudioCtx() {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        return audioCtx;
+    }
+
+    // Upbeat recycling-themed chiptune: arpeggiated major chord loop + bass + hi-hat
+    function startMusic() {
+        if (musicStarted) return;
+        musicStarted = true;
+        const ctx = getAudioCtx();
+
+        const masterGain = ctx.createGain();
+        masterGain.gain.setValueAtTime(musicOn ? 0.18 : 0, ctx.currentTime);
+        masterGain.connect(ctx.destination);
+        musicNodes.push(masterGain);
+
+        // Melody: bouncy arpeggio in C major (C4 E4 G4 C5) looping
+        const melodyNotes = [261.63, 329.63, 392.00, 523.25, 392.00, 329.63]; // C E G C5 G E
+        const melodyGain = ctx.createGain();
+        melodyGain.gain.value = 1.0;
+        melodyGain.connect(masterGain);
+
+        const bpm = 140;
+        const sixteenth = 60 / bpm / 4;
+
+        function scheduleMelody(startTime) {
+            melodyNotes.forEach((freq, i) => {
+                const osc = ctx.createOscillator();
+                const env = ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.value = freq;
+                osc.connect(env);
+                env.connect(melodyGain);
+                const t = startTime + i * sixteenth;
+                env.gain.setValueAtTime(0, t);
+                env.gain.linearRampToValueAtTime(0.35, t + 0.005);
+                env.gain.exponentialRampToValueAtTime(0.001, t + sixteenth * 0.8);
+                osc.start(t);
+                osc.stop(t + sixteenth);
+                musicNodes.push(osc);
+            });
+        }
+
+        // Bass line: C2 G2 alternating per bar
+        const bassNotes = [65.41, 98.00, 65.41, 130.81];
+        const bassGain = ctx.createGain();
+        bassGain.gain.value = 0.8;
+        bassGain.connect(masterGain);
+
+        function scheduleBass(startTime) {
+            const beat = 60 / bpm;
+            bassNotes.forEach((freq, i) => {
+                const osc = ctx.createOscillator();
+                const env = ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.value = freq;
+                osc.connect(env);
+                env.connect(bassGain);
+                const t = startTime + i * beat;
+                env.gain.setValueAtTime(0, t);
+                env.gain.linearRampToValueAtTime(0.5, t + 0.01);
+                env.gain.exponentialRampToValueAtTime(0.001, t + beat * 0.7);
+                osc.start(t);
+                osc.stop(t + beat);
+                musicNodes.push(osc);
+            });
+        }
+
+        // Hi-hat: noise bursts on every sixteenth
+        function scheduleHihat(startTime, beats) {
+            for (let i = 0; i < beats; i++) {
+                const bufSize = ctx.sampleRate * 0.04;
+                const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+                const data = buf.getChannelData(0);
+                for (let j = 0; j < bufSize; j++) data[j] = Math.random() * 2 - 1;
+                const src = ctx.createBufferSource();
+                src.buffer = buf;
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'highpass';
+                filter.frequency.value = 7000;
+                const env = ctx.createGain();
+                src.connect(filter);
+                filter.connect(env);
+                env.connect(masterGain);
+                const t = startTime + i * sixteenth;
+                env.gain.setValueAtTime(0.06, t);
+                env.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
+                src.start(t);
+                src.stop(t + 0.05);
+                musicNodes.push(src);
+            }
+        }
+
+        const barDuration = melodyNotes.length * sixteenth;  // one arp cycle
+
+        let loopTime = ctx.currentTime + 0.05;
+        const totalBars = 200; // enough for a very long game
+        for (let bar = 0; bar < totalBars; bar++) {
+            const t = loopTime + bar * barDuration;
+            scheduleMelody(t);
+            if (bar % 2 === 0) scheduleBass(t);
+            scheduleHihat(t, melodyNotes.length);
+        }
+
+        // Store master gain for mute/unmute
+        musicNodes._master = masterGain;
+    }
+
+    function stopMusic() {
+        musicNodes.forEach(n => { try { n.stop && n.stop(); } catch(e){} });
+        musicNodes = [];
+        musicStarted = false;
+    }
+
+    window.toggleSound = () => {
+        musicOn = !musicOn;
+        document.getElementById('soundBtn').textContent = musicOn ? '🔊' : '🔇';
+        if (musicOn) {
+            if (!musicStarted) startMusic();
+            else if (musicNodes._master) musicNodes._master.gain.setValueAtTime(0.18, getAudioCtx().currentTime);
+        } else {
+            if (musicNodes._master) musicNodes._master.gain.setValueAtTime(0, getAudioCtx().currentTime);
+        }
+    };
+
+    // Auto-start music on first user interaction (browser policy)
+    function ensureMusic() {
+        if (!musicStarted && musicOn) startMusic();
+        document.removeEventListener('pointerdown', ensureMusic);
+    }
+    document.addEventListener('pointerdown', ensureMusic);
+    // ── END MUSIC ENGINE ──────────────────────────────────────────────────────
+    const RECYCLABLES = ['📄', '📦', '🥤', '🧴', '🥫', '📰'];
+    const NON_RECYCLABLES = ['☢️', '💉', '🍖', '🍕', '🚽', '🦠'];
+    
+    const LOCATION_ITEMS = {
+        galaxy: {
+            recyclables: ['📄', '📦', '🥤', '🧴', '🔋', '📰'],
+            nonRecyclables: ['☢️', '💉', '🍖', '🍕', '🩹', '🦠']
+        },
+        pizza: {
+            recyclables: ['🧻', '📦', '🥤', '🧴', '🥫', '📰'],
+            nonRecyclables: ['🍕', '🍖', '🍔', '🌭', '🧀', '🥓']
+        },
+        school: {
+            recyclables: ['📚', '📓', '✏️', '🧃', '🗞️', '📋'],
+            nonRecyclables: ['🖍️', '🧪', '🔬', '🍎', '🥪', '🧃']
+        }
+    };
+    
+    const LASER_COLORS = [
+        { name: 'red', value: '#ef4444' },
+        { name: 'green', value: '#22c55e' },
+        { name: 'blue', value: '#3b82f6' },
+        { name: 'purple', value: '#a855f7' },
+        { name: 'pink', value: '#ec4899' },
+        { name: 'orange', value: '#f97316' }
+    ];
+
+    const SETTINGS = {
+        difficulty: 'easy',
+        location: 'galaxy',
+        laserColor: '#ef4444'
+    };
+
+    const DIFFICULTIES = {
+        easy: { spawnRate: 2000, speedMulti: 1.0, nonRecyclableChance: 0.3, scoreMulti: 1 },
+        medium: { spawnRate: 1500, speedMulti: 1.5, nonRecyclableChance: 0.4, scoreMulti: 2 },
+        hard: { spawnRate: 800, speedMulti: 2, nonRecyclableChance: 0.6, scoreMulti: 3 }
+    };
+
+    const LOCATIONS = {
+        galaxy: { bg: '#0f172a', type: 'stars' },
+        pizza: { bg: '#fef3c7', type: 'pizzaplace' },
+        school: { bg: '#f5e6d3', type: 'classroom' }
+    };
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    let gameState = 'menu';
+    let width, height;
+    let lastTime = 0;
+    
+    let items = [];
+    let particles = [];
+    let lasers = [];
+    
+    let score = 0;
+    let lives = 3;
+    let lastSpawnTime = 0;
+    
+    let boss = null;
+    let lastBossThreshold = 0;
+    let bossLastThrowTime = 0;
+    
+    const BOSS_CONFIG = {
+        maxHealth: 10,
+        throwInterval: 600,
+        width: 100,
+        height: 120
+    };
+    
+    const bin = {
+        width: 140,
+        height: 80,
+        color: '#22c55e',
+        x: 0,
+        y: 0
+    };
+
+    function resize() {
+        width = canvas.width = window.innerWidth;
+        height = canvas.height = window.innerHeight;
+        bin.x = width / 2;
+        bin.y = height - bin.height / 2;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    let mouseX = width / 2;
+    let mouseY = height / 2;
+    
+    canvas.addEventListener('mousemove', (e) => {
+        mouseX = e.clientX;
+        mouseY = e.clientY;
+    });
+
+    canvas.addEventListener('mousedown', (e) => {
+        if (gameState !== 'playing') return;
+        fireLaser(e.clientX, e.clientY);
+    });
+
+    canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        mouseX = touch.clientX;
+        mouseY = touch.clientY;
+    }, { passive: false });
+
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        mouseX = touch.clientX;
+        mouseY = touch.clientY;
+        if (gameState !== 'playing') return;
+        fireLaser(touch.clientX, touch.clientY);
+    }, { passive: false });
+
+    function initMenu() {
+        const container = document.getElementById('colorContainer');
+        container.innerHTML = '';
+        LASER_COLORS.forEach((c, idx) => {
+            const div = document.createElement('div');
+            div.className = `color-option ${idx === 0 ? 'selected' : ''}`;
+            div.style.backgroundColor = c.value;
+            div.onclick = () => selectColor(c.value, div);
+            container.appendChild(div);
+        });
+        
+        document.getElementById('galaxyRecycle').textContent = LOCATION_ITEMS.galaxy.recyclables.join(' ');
+        document.getElementById('galaxyTrash').textContent = LOCATION_ITEMS.galaxy.nonRecyclables.join(' ');
+        document.getElementById('pizzaRecycle').textContent = LOCATION_ITEMS.pizza.recyclables.join(' ');
+        document.getElementById('pizzaTrash').textContent = LOCATION_ITEMS.pizza.nonRecyclables.join(' ');
+        document.getElementById('schoolRecycle').textContent = LOCATION_ITEMS.school.recyclables.join(' ');
+        document.getElementById('schoolTrash').textContent = LOCATION_ITEMS.school.nonRecyclables.join(' ');
+    }
+
+    window.showInfo = () => document.getElementById('infoModal').classList.remove('hidden');
+    window.hideInfo = () => document.getElementById('infoModal').classList.add('hidden');
+
+    window.selectDifficulty = (diff, btn) => {
+        SETTINGS.difficulty = diff;
+        btn.parentElement.querySelectorAll('.option-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+    };
+
+    window.selectLocation = (loc, btn) => {
+        SETTINGS.location = loc;
+        btn.parentElement.querySelectorAll('.option-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+    };
+
+    window.selectColor = (color, div) => {
+        SETTINGS.laserColor = color;
+        document.querySelectorAll('.color-option').forEach(d => d.classList.remove('selected'));
+        div.classList.add('selected');
+    };
+
+    window.startGame = () => {
+        gameState = 'playing';
+        document.getElementById('startMenu').classList.add('hidden');
+        document.getElementById('hud').classList.remove('hidden');
+        document.getElementById('finishBtn').classList.remove('hidden');
+        document.getElementById('soundBtn').classList.remove('hidden');
+        document.getElementById('gameOverMenu').classList.add('hidden');
+        document.getElementById('wellDoneMenu').classList.add('hidden');
+        document.getElementById('levelDisplay').textContent = SETTINGS.difficulty.charAt(0).toUpperCase() + SETTINGS.difficulty.slice(1);
+        resetGameState();
+    };
+
+    window.resetGame = () => {
+        gameState = 'menu';
+        document.getElementById('gameOverMenu').classList.add('hidden');
+        document.getElementById('wellDoneMenu').classList.add('hidden');
+        document.getElementById('startMenu').classList.remove('hidden');
+        document.getElementById('hud').classList.add('hidden');
+        document.getElementById('finishBtn').classList.add('hidden');
+        document.getElementById('soundBtn').classList.add('hidden');
+    };
+
+    window.finishGame = () => {
+        gameState = 'finished';
+        document.getElementById('hud').classList.add('hidden');
+        document.getElementById('finishBtn').classList.add('hidden');
+        document.getElementById('soundBtn').classList.add('hidden');
+        document.getElementById('wellDoneScore').textContent = score;
+        window.parent.postMessage({ type: 'score', value: score }, '*');
+        document.getElementById('wellDoneMenu').classList.remove('hidden');
+    };
+
+    function resetGameState() {
+        items = [];
+        particles = [];
+        lasers = [];
+        score = 0;
+        lives = 3;
+        lastSpawnTime = 0;
+        boss = null;
+        lastBossThreshold = 0;
+        bossLastThrowTime = 0;
+        updateHUD();
+    }
+
+    function updateHUD() {
+        document.getElementById('scoreDisplay').textContent = score;
+        document.getElementById('livesDisplay').textContent = '❤️'.repeat(lives) + '🖤'.repeat(3 - lives);
+    }
+
+    function loop(time) {
+        const dt = time - lastTime;
+        lastTime = time;
+
+        if (gameState === 'playing') {
+            update(dt, time);
+        }
+        draw(time);
+        
+        requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+
+    function update(dt, time) {
+        const config = DIFFICULTIES[SETTINGS.difficulty];
+
+        if (!boss && time - lastSpawnTime > config.spawnRate) {
+            spawnItem(config);
+            lastSpawnTime = time;
+        }
+
+        for (let i = items.length - 1; i >= 0; i--) {
+            const item = items[i];
+            const speed = item.speed * config.speedMulti;
+            const binYPos = height - bin.height;
+            const yRemaining = binYPos - item.y;
+            const xDist = bin.x - item.x;
+            
+            item.y += speed;
+            
+            if (yRemaining > 0) {
+                const framesRemaining = yRemaining / speed;
+                const xSpeed = xDist / framesRemaining;
+                item.x += xSpeed;
+            }
+
+            item.rotation += item.rotationSpeed;
+
+            const binTop = height - bin.height;
+            const inBinX = Math.abs(item.x - bin.x) < bin.width / 2;
+            const inBinY = item.y > binTop + 10;
+
+            if (inBinY && inBinX) {
+                if (item.type === 'recyclable') {
+                    score += 10 * config.scoreMulti;
+                    spawnParticles(item.x, item.y, '#4ade80', 5);
+                } else {
+                    lives--;
+                    spawnParticles(item.x, item.y, '#ef4444', 10);
+                    checkGameOver();
+                }
+                updateHUD();
+                items.splice(i, 1);
+                continue;
+            }
+
+            if (item.y > height) {
+                items.splice(i, 1);
+            }
+        }
+
+        for (let i = lasers.length - 1; i >= 0; i--) {
+            if (time - lasers[i].createdAt > 150) {
+                lasers.splice(i, 1);
+            }
+        }
+
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life -= dt;
+            if (p.life <= 0) particles.splice(i, 1);
+        }
+        
+        const bossThreshold = Math.floor(score / 1000);
+        if (bossThreshold > lastBossThreshold && !boss) {
+            spawnBoss();
+            lastBossThreshold = bossThreshold;
+        }
+        
+        if (boss) {
+            boss.x += boss.direction * 2;
+            if (boss.x < 100 || boss.x > width - 100) boss.direction *= -1;
+            boss.bobOffset = Math.sin(time * 0.003) * 10;
+            
+            if (time - bossLastThrowTime > BOSS_CONFIG.throwInterval) {
+                bossThrowItem();
+                bossLastThrowTime = time;
+            }
+            
+            if (boss.health <= 0) {
+                score += 100 * DIFFICULTIES[SETTINGS.difficulty].scoreMulti;
+                spawnParticles(boss.x, boss.y, '#fbbf24', 30);
+                spawnParticles(boss.x, boss.y, '#ef4444', 20);
+                boss = null;
+                lastBossThreshold = Math.floor(score / 1000);
+                updateHUD();
+            }
+        }
+    }
+
+    function draw(time) {
+        const loc = LOCATIONS[SETTINGS.location];
+        ctx.fillStyle = loc.bg;
+        ctx.fillRect(0, 0, width, height);
+
+        if (loc.type === 'stars') drawStars(time);
+        else if (loc.type === 'pizzaplace') drawPizzaPlace(time);
+        else if (loc.type === 'classroom') drawClassroom(time);
+
+        ctx.save();
+        ctx.translate(bin.x, height - bin.height/2);
+        
+        const bw = bin.width;
+        const bh = bin.height;
+        
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.beginPath();
+        ctx.ellipse(0, bh/2 + 5, bw/2 + 15, 12, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        const bodyGradient = ctx.createLinearGradient(-bw/2, 0, bw/2, 0);
+        bodyGradient.addColorStop(0, '#15803d');
+        bodyGradient.addColorStop(0.3, '#22c55e');
+        bodyGradient.addColorStop(0.7, '#22c55e');
+        bodyGradient.addColorStop(1, '#166534');
+        ctx.fillStyle = bodyGradient;
+        
+        ctx.beginPath();
+        ctx.moveTo(-bw/2 - 8, -bh/2 + 10);
+        ctx.lineTo(bw/2 + 8, -bh/2 + 10);
+        ctx.lineTo(bw/2 - 5, bh/2);
+        ctx.lineTo(-bw/2 + 5, bh/2);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.fillStyle = '#14532d';
+        ctx.beginPath();
+        ctx.moveTo(-bw/2 - 5, -bh/2 + 12);
+        ctx.lineTo(bw/2 + 5, -bh/2 + 12);
+        ctx.lineTo(bw/2, -bh/2 + 25);
+        ctx.lineTo(-bw/2, -bh/2 + 25);
+        ctx.closePath();
+        ctx.fill();
+        
+        const rimGradient = ctx.createLinearGradient(0, -bh/2 - 5, 0, -bh/2 + 15);
+        rimGradient.addColorStop(0, '#4ade80');
+        rimGradient.addColorStop(0.5, '#22c55e');
+        rimGradient.addColorStop(1, '#15803d');
+        ctx.fillStyle = rimGradient;
+        ctx.beginPath();
+        ctx.moveTo(-bw/2 - 15, -bh/2);
+        ctx.lineTo(bw/2 + 15, -bh/2);
+        ctx.lineTo(bw/2 + 10, -bh/2 + 12);
+        ctx.lineTo(-bw/2 - 10, -bh/2 + 12);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.strokeStyle = '#86efac';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-bw/2 - 14, -bh/2 + 2);
+        ctx.lineTo(bw/2 + 14, -bh/2 + 2);
+        ctx.stroke();
+        
+        ctx.font = '40px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('♻️', 0, 8);
+        
+        const raccoonX = 0;
+        const raccoonY = -bh/2 - 25;
+        
+        const shoulderAbsX = bin.x + 20;
+        const shoulderAbsY = (height - bin.height/2) + raccoonY + 15;
+        const aimDx = mouseX - shoulderAbsX;
+        const aimDy = mouseY - shoulderAbsY;
+        const aimAngle = Math.atan2(aimDy, aimDx);
+        
+        ctx.save();
+        ctx.translate(raccoonX, raccoonY);
+        
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(-100, -100, 200, 100 + 25);
+        ctx.clip();
+        
+        ctx.fillStyle = '#6b7280';
+        ctx.beginPath();
+        ctx.ellipse(0, 15, 22, 18, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.restore();
+        
+        ctx.fillStyle = '#9ca3af';
+        ctx.beginPath();
+        ctx.ellipse(0, -5, 20, 18, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#4b5563';
+        ctx.beginPath();
+        ctx.ellipse(-15, -20, 8, 10, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(15, -20, 8, 10, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#f9a8d4';
+        ctx.beginPath();
+        ctx.ellipse(-15, -19, 4, 5, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(15, -19, 4, 5, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#374151';
+        ctx.beginPath();
+        ctx.ellipse(-8, -5, 10, 8, 0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(8, -5, 10, 8, -0.2, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#e5e7eb';
+        ctx.beginPath();
+        ctx.ellipse(0, 3, 10, 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#1f2937';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 4, 3, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.ellipse(-8, -6, 5, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(8, -6, 5, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        const pupilX = Math.cos(aimAngle) * 2;
+        const pupilY = Math.sin(aimAngle) * 1.5;
+        ctx.fillStyle = '#1f2937';
+        ctx.beginPath();
+        ctx.ellipse(-8 + pupilX, -6 + pupilY, 2.5, 3, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(8 + pupilX, -6 + pupilY, 2.5, 3, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.save();
+        ctx.translate(-20, 15);
+        ctx.rotate(Math.PI / 2);
+        ctx.fillStyle = '#6b7280';
+        ctx.beginPath();
+        ctx.ellipse(10, 0, 10, 5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#9ca3af';
+        ctx.beginPath();
+        ctx.ellipse(18, 0, 7, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#d1d5db';
+        ctx.beginPath();
+        ctx.ellipse(22, -3, 3, 2.5, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(23, 0, 3, 2.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(22, 3, 3, 2.5, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        
+        ctx.save();
+        ctx.translate(20, 15);
+        ctx.rotate(aimAngle);
+        ctx.fillStyle = '#6b7280';
+        ctx.beginPath();
+        ctx.ellipse(10, 0, 10, 5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#9ca3af';
+        ctx.beginPath();
+        ctx.ellipse(18, 0, 7, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#d1d5db';
+        ctx.beginPath();
+        ctx.ellipse(22, -3, 3, 2.5, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(23, 0, 3, 2.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(22, 3, 3, 2.5, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#1f2937';
+        ctx.fillRect(24, -5, 22, 10);
+        ctx.fillStyle = '#111827';
+        ctx.fillRect(26, -6, 6, 12);
+        ctx.fillStyle = '#374151';
+        ctx.fillRect(32, -4, 12, 8);
+        ctx.fillStyle = SETTINGS.laserColor;
+        ctx.fillRect(40, -2, 8, 4);
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = SETTINGS.laserColor;
+        ctx.fillRect(40, -2, 8, 4);
+        ctx.shadowBlur = 0;
+        ctx.restore();
+        ctx.restore();
+        
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+        ctx.lineWidth = 2;
+        for (let i = -2; i <= 2; i++) {
+            if (i === 0) continue;
+            const x = i * 25;
+            ctx.beginPath();
+            ctx.moveTo(x, -bh/2 + 25);
+            ctx.lineTo(x * 0.9, bh/2 - 5);
+            ctx.stroke();
+        }
+        
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(-bw/2 - 3, -bh/2 + 15);
+        ctx.lineTo(-bw/2 + 7, bh/2 - 5);
+        ctx.stroke();
+        
+        ctx.restore();
+
+        items.forEach(item => {
+            ctx.save();
+            ctx.translate(item.x, item.y);
+            ctx.rotate(item.rotation);
+            ctx.font = '40px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(item.emoji, 0, 0);
+            ctx.restore();
+        });
+
+        lasers.forEach(laser => {
+            ctx.save();
+            ctx.beginPath();
+            const shoulderX = bin.x + 20;
+            const shoulderY = height - bin.height - 10;
+            const gunAngle = Math.atan2(laser.ty - shoulderY, laser.tx - shoulderX);
+            const gunX = shoulderX + Math.cos(gunAngle) * 48;
+            const gunY = shoulderY + Math.sin(gunAngle) * 48;
+            ctx.moveTo(gunX, gunY);
+            ctx.lineTo(laser.tx, laser.ty);
+            ctx.lineWidth = 8;
+            ctx.strokeStyle = SETTINGS.laserColor;
+            ctx.lineCap = 'round';
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = SETTINGS.laserColor;
+            ctx.globalAlpha = Math.max(0, 1 - (time - laser.createdAt) / 150);
+            ctx.stroke();
+            ctx.restore();
+        });
+
+        particles.forEach(p => {
+            ctx.fillStyle = p.color;
+            ctx.globalAlpha = Math.max(0, p.life / 500);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+        
+        if (boss) drawBoss(time);
+    }
+
+    function spawnItem(config) {
+        const locationItems = LOCATION_ITEMS[SETTINGS.location];
+        const isNonRecyclable = Math.random() < config.nonRecyclableChance;
+        const list = isNonRecyclable ? locationItems.nonRecyclables : locationItems.recyclables;
+        const emoji = list[Math.floor(Math.random() * list.length)];
+        const padding = 50;
+        const startX = padding + Math.random() * (width - padding*2);
+
+        items.push({
+            x: startX,
+            y: -50,
+            emoji: emoji,
+            type: isNonRecyclable ? 'non-recyclable' : 'recyclable',
+            speed: 2 + Math.random() * 2,
+            rotation: Math.random() * Math.PI,
+            rotationSpeed: (Math.random() - 0.5) * 0.1
+        });
+    }
+
+    function fireLaser(tx, ty) {
+        lasers.push({ tx, ty, createdAt: performance.now() });
+        const hitRadius = 50;
+        
+        if (boss) {
+            const bossDist = Math.hypot(boss.x - tx, (boss.y + boss.bobOffset) - ty);
+            if (bossDist < 60) {
+                boss.health--;
+                spawnParticles(tx, ty, SETTINGS.laserColor, 10);
+                boss.hitFlash = 5;
+            }
+        }
+        
+        for (let i = items.length - 1; i >= 0; i--) {
+            const item = items[i];
+            const dist = Math.hypot(item.x - tx, item.y - ty);
+            
+            if (dist < hitRadius) {
+                const config = DIFFICULTIES[SETTINGS.difficulty];
+                if (item.type === 'non-recyclable') {
+                    score += 20 * config.scoreMulti;
+                    spawnParticles(item.x, item.y, SETTINGS.laserColor, 15);
+                    items.splice(i, 1);
+                } else {
+                    score = Math.max(0, score - 10 * config.scoreMulti);
+                    spawnParticles(item.x, item.y, '#fbbf24', 5);
+                    items.splice(i, 1);
+                }
+                updateHUD();
+            }
+        }
+    }
+
+    function spawnParticles(x, y, color, count) {
+        for(let i=0; i<count; i++) {
+            particles.push({
+                x, y,
+                vx: (Math.random() - 0.5) * 10,
+                vy: (Math.random() - 0.5) * 10,
+                life: 500 + Math.random() * 200,
+                color: color,
+                size: 2 + Math.random() * 3
+            });
+        }
+    }
+
+    function checkGameOver() {
+        if (lives <= 0) {
+            gameState = 'gameover';
+            document.getElementById('hud').classList.add('hidden');
+            document.getElementById('finishBtn').classList.add('hidden');
+            document.getElementById('soundBtn').classList.add('hidden');
+            document.getElementById('gameOverMenu').classList.remove('hidden');
+            document.getElementById('finalScore').textContent = score;
+
+            // Send the score to the parent window
+            window.parent.postMessage({ type: 'score', value: score }, '*');
+        }
+    }
+    
+    function spawnBoss() {
+        boss = {
+            x: width / 2,
+            y: 120,
+            health: BOSS_CONFIG.maxHealth,
+            direction: 1,
+            bobOffset: 0,
+            hitFlash: 0
+        };
+        bossLastThrowTime = performance.now();
+    }
+    
+    function bossThrowItem() {
+        const locationItems = LOCATION_ITEMS[SETTINGS.location];
+        const config = DIFFICULTIES[SETTINGS.difficulty];
+        const isNonRecyclable = Math.random() < config.nonRecyclableChance;
+        const list = isNonRecyclable ? locationItems.nonRecyclables : locationItems.recyclables;
+        const emoji = list[Math.floor(Math.random() * list.length)];
+        
+        items.push({
+            x: boss.x,
+            y: boss.y + 50,
+            emoji: emoji,
+            type: isNonRecyclable ? 'non-recyclable' : 'recyclable',
+            speed: 2 + Math.random() * 2,
+            rotation: Math.random() * Math.PI,
+            rotationSpeed: (Math.random() - 0.5) * 0.15,
+            fromBoss: true
+        });
+    }
+    
+    function drawBoss(time) {
+        ctx.save();
+        ctx.translate(boss.x, boss.y + boss.bobOffset);
+        
+        if (boss.hitFlash > 0) {
+            ctx.globalAlpha = 0.5 + Math.sin(time * 0.05) * 0.3;
+            boss.hitFlash--;
+        }
+        
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.beginPath();
+        ctx.ellipse(0, 60, 50, 15, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        const bodyGradient = ctx.createLinearGradient(-40, -40, 40, 60);
+        bodyGradient.addColorStop(0, '#4a5568');
+        bodyGradient.addColorStop(0.5, '#2d3748');
+        bodyGradient.addColorStop(1, '#1a202c');
+        ctx.fillStyle = bodyGradient;
+        
+        ctx.beginPath();
+        ctx.moveTo(-45, -30);
+        ctx.lineTo(45, -30);
+        ctx.lineTo(40, 50);
+        ctx.lineTo(-40, 50);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.fillStyle = '#718096';
+        ctx.beginPath();
+        ctx.ellipse(0, -35, 50, 12, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#4a5568';
+        ctx.beginPath();
+        ctx.ellipse(0, -35, 40, 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#ef4444';
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#ef4444';
+        ctx.beginPath();
+        ctx.ellipse(-18, -10, 12, 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(18, -10, 12, 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        
+        ctx.fillStyle = '#1a202c';
+        ctx.beginPath();
+        ctx.ellipse(-18, -10, 5, 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(18, -10, 5, 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(-25, 20);
+        ctx.lineTo(-15, 30);
+        ctx.lineTo(-5, 20);
+        ctx.lineTo(5, 30);
+        ctx.lineTo(15, 20);
+        ctx.lineTo(25, 30);
+        ctx.stroke();
+        
+        ctx.fillStyle = '#6b7280';
+        ctx.save();
+        ctx.translate(-45, 10);
+        ctx.rotate(-0.3 + Math.sin(time * 0.005) * 0.2);
+        ctx.fillRect(-30, -8, 30, 16);
+        ctx.fillStyle = '#4b5563';
+        ctx.beginPath();
+        ctx.ellipse(-35, 0, 10, 12, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        
+        ctx.fillStyle = '#6b7280';
+        ctx.save();
+        ctx.translate(45, 10);
+        ctx.rotate(0.3 - Math.sin(time * 0.005) * 0.2);
+        ctx.fillRect(0, -8, 30, 16);
+        ctx.fillStyle = '#4b5563';
+        ctx.beginPath();
+        ctx.ellipse(35, 0, 10, 12, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        
+        ctx.font = '24px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('🦠', -20, -20);
+        ctx.fillText('🍕', 15, -15);
+        
+        ctx.restore();
+        
+        const barWidth = 100;
+        const barHeight = 10;
+        const barX = boss.x - barWidth / 2;
+        const barY = boss.y - 70;
+        
+        ctx.fillStyle = '#1f2937';
+        ctx.fillRect(barX - 2, barY - 2, barWidth + 4, barHeight + 4);
+        ctx.fillStyle = '#374151';
+        ctx.fillRect(barX, barY, barWidth, barHeight);
+        
+        const healthPercent = boss.health / BOSS_CONFIG.maxHealth;
+        const healthColor = healthPercent > 0.5 ? '#22c55e' : healthPercent > 0.25 ? '#fbbf24' : '#ef4444';
+        ctx.fillStyle = healthColor;
+        ctx.fillRect(barX, barY, barWidth * healthPercent, barHeight);
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 14px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('TRASH ZOMBIE', boss.x, barY - 8);
+    }
+    
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'b' || e.key === 'B') {
+            if (gameState === 'playing') {
+                score += 500;
+                updateHUD();
+            }
+        }
+    });
+
+    const stars = [];
+    for(let i=0; i<100; i++) {
+        stars.push({
+            x: Math.random() * 2000,
+            y: Math.random() * 1000,
+            size: Math.random() * 2,
+            blink: Math.random()
+        });
+    }
+
+    function drawStars(time) {
+        ctx.fillStyle = 'white';
+        stars.forEach(star => {
+            const alpha = 0.5 + 0.5 * Math.sin(time * 0.005 + star.blink * 10);
+            ctx.globalAlpha = alpha;
+            ctx.fillRect(star.x % width, star.y % height, star.size, star.size);
+        });
+        ctx.globalAlpha = 1;
+    }
+
+    function drawPizzaPlace(time) {
+        const gradient = ctx.createLinearGradient(0, 0, 0, height);
+        gradient.addColorStop(0, '#fbbf24');
+        gradient.addColorStop(0.6, '#f59e0b');
+        gradient.addColorStop(1, '#d97706');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+
+        const tableHeight = 120;
+        const tableY = height - tableHeight - 60;
+        ctx.fillStyle = '#dc2626';
+        ctx.fillRect(0, tableY, width, tableHeight);
+        ctx.fillStyle = '#ffffff';
+        const checkSize = 30;
+        for(let x = 0; x < width; x += checkSize * 2) {
+            for(let y = tableY; y < tableY + tableHeight; y += checkSize * 2) {
+                ctx.fillRect(x, y, checkSize, checkSize);
+                ctx.fillRect(x + checkSize, y + checkSize, checkSize, checkSize);
+            }
+        }
+
+        ctx.fillStyle = '#78350f';
+        ctx.fillRect(0, height - 60, width, 60);
+        ctx.fillStyle = '#92400e';
+        ctx.fillRect(0, height - 60, width, 8);
+
+        ctx.fillStyle = '#b45309';
+        ctx.globalAlpha = 0.3;
+        const brickW = 60, brickH = 25;
+        for(let row = 0; row < tableY / brickH; row++) {
+            const offset = (row % 2) * (brickW / 2);
+            for(let col = -1; col < width / brickW + 1; col++) {
+                ctx.strokeStyle = '#92400e';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(col * brickW + offset, row * brickH, brickW, brickH);
+            }
+        }
+        ctx.globalAlpha = 1;
+
+        const lightColors = ['#fef08a', '#fde047', '#facc15'];
+        ctx.strokeStyle = '#1c1917';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(0, 60);
+        for(let x = 0; x <= width; x += 10) {
+            ctx.lineTo(x, 60 + Math.sin(x * 0.02) * 15);
+        }
+        ctx.stroke();
+
+        for(let x = 40; x < width; x += 80) {
+            const y = 60 + Math.sin(x * 0.02) * 15;
+            const glow = 0.7 + 0.3 * Math.sin(time * 0.003 + x);
+            ctx.fillStyle = lightColors[Math.floor(x / 80) % 3];
+            ctx.globalAlpha = glow;
+            ctx.beginPath();
+            ctx.arc(x, y + 15, 12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = glow * 0.3;
+            ctx.beginPath();
+            ctx.arc(x, y + 15, 25, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+
+        ctx.save();
+        ctx.font = 'bold 60px Arial';
+        ctx.textAlign = 'center';
+        const signGlow = 0.8 + 0.2 * Math.sin(time * 0.005);
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = '#ef4444';
+        ctx.fillStyle = `rgba(239, 68, 68, ${signGlow})`;
+        ctx.fillText('PIZZA', width / 2, 250);
+        ctx.shadowBlur = 0;
+        ctx.restore();
+    }
+
+    function drawClassroom(time) {
+        const wallGradient = ctx.createLinearGradient(0, 0, 0, height);
+        wallGradient.addColorStop(0, '#f5e6d3');
+        wallGradient.addColorStop(0.7, '#e8d5c4');
+        wallGradient.addColorStop(1, '#d4c4b0');
+        ctx.fillStyle = wallGradient;
+        ctx.fillRect(0, 0, width, height);
+
+        // Floor and wainscot — proportional to height
+        const floorH = Math.round(height * 0.12);
+        const floorY = height - floorH;
+        const wainscotHeight = Math.round(height * 0.14);
+        const wainscotY = floorY - wainscotHeight;
+
+        ctx.fillStyle = '#8b6914';
+        ctx.fillRect(0, wainscotY, width, wainscotHeight);
+        
+        ctx.strokeStyle = '#6b4f12';
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.4;
+        for (let y = wainscotY + 10; y < wainscotY + wainscotHeight; y += 8) {
+            ctx.beginPath();
+            ctx.moveTo(0, y + Math.sin(y * 0.1) * 2);
+            for (let x = 0; x < width; x += 20) {
+                ctx.lineTo(x, y + Math.sin((x + y) * 0.05) * 2);
+            }
+            ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        
+        ctx.fillStyle = '#a67c00';
+        ctx.fillRect(0, wainscotY - 8, width, 12);
+        ctx.fillStyle = '#6b4f12';
+        ctx.fillRect(0, wainscotY + wainscotHeight - 4, width, 4);
+
+        // Chalkboard — proportional, centred, fits between top and wainscot
+        const wallAreaH = wainscotY; // available wall height
+        const boardTopMargin = Math.round(wallAreaH * 0.12);
+        const boardHeight = Math.round(Math.min(wallAreaH * 0.55, height * 0.32));
+        const boardWidth = Math.min(Math.round(width * 0.6), 500);
+        const boardX = (width - boardWidth) / 2;
+        const boardY = boardTopMargin;
+        
+        ctx.fillStyle = '#5c4033';
+        ctx.fillRect(boardX - 15, boardY - 15, boardWidth + 30, boardHeight + 30);
+        ctx.fillStyle = '#8b6914';
+        ctx.fillRect(boardX - 12, boardY - 12, boardWidth + 24, boardHeight + 24);
+        
+        const chalkGradient = ctx.createLinearGradient(boardX, boardY, boardX, boardY + boardHeight);
+        chalkGradient.addColorStop(0, '#1a472a');
+        chalkGradient.addColorStop(0.5, '#2d5a3d');
+        chalkGradient.addColorStop(1, '#1a472a');
+        ctx.fillStyle = chalkGradient;
+        ctx.fillRect(boardX, boardY, boardWidth, boardHeight);
+        
+        ctx.globalAlpha = 0.15;
+        ctx.fillStyle = '#ffffff';
+        for (let i = 0; i < 20; i++) {
+            const smudgeX = boardX + 30 + (i * 47) % (boardWidth - 60);
+            const smudgeY = boardY + 20 + (i * 31) % (boardHeight - 40);
+            ctx.beginPath();
+            ctx.arc(smudgeX, smudgeY, 15 + (i % 10), 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        
+        const boardFontSize = Math.round(Math.min(36, boardHeight * 0.22));
+        const boardSmallFont = Math.round(Math.min(20, boardHeight * 0.13));
+        ctx.save();
+        ctx.font = `italic ${boardFontSize}px Georgia, serif`;
+        ctx.fillStyle = '#e8e8e8';
+        ctx.globalAlpha = 0.9;
+        ctx.textAlign = 'center';
+        ctx.fillText('Recycle!', width / 2, boardY + boardHeight * 0.45);
+        ctx.font = `${boardSmallFont}px "Courier New", monospace`;
+        ctx.globalAlpha = 0.6;
+        ctx.textAlign = 'left';
+        ctx.fillText('2 + 2 = 4', boardX + 30, boardY + boardHeight * 0.75);
+        ctx.fillText('ABC', boardX + boardWidth - 80, boardY + boardHeight * 0.3);
+        ctx.restore();
+        
+        ctx.fillStyle = '#5c4033';
+        ctx.fillRect(boardX - 10, boardY + boardHeight + 5, boardWidth + 20, 15);
+        
+        const chalkColors = ['#ffffff', '#fef08a', '#f9a8d4'];
+        chalkColors.forEach((color, i) => {
+            ctx.fillStyle = color;
+            ctx.fillRect(boardX + 20 + i * 35, boardY + boardHeight + 7, 25, 8);
+        });
+
+        // Clock — tucked in top-right, safe distance from board edge
+        const clockRadius = Math.round(Math.min(45, width * 0.06));
+        const clockX = width - clockRadius - 12;
+        const clockY = boardY + clockRadius + 5;
+        
+        ctx.fillStyle = '#fefefe';
+        ctx.beginPath();
+        ctx.arc(clockX, clockY, clockRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#2d2d2d';
+        ctx.lineWidth = 4;
+        ctx.stroke();
+        
+        ctx.fillStyle = '#2d2d2d';
+        for (let i = 0; i < 12; i++) {
+            const angle = (i * Math.PI / 6) - Math.PI / 2;
+            const markerX = clockX + Math.cos(angle) * (clockRadius - 8);
+            const markerY = clockY + Math.sin(angle) * (clockRadius - 8);
+            ctx.beginPath();
+            ctx.arc(markerX, markerY, Math.max(2, clockRadius * 0.07), 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        const seconds = (time / 1000) % 60;
+        const minutes = (time / 60000) % 60;
+        
+        ctx.strokeStyle = '#2d2d2d';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        const minAngle = (minutes / 60) * Math.PI * 2 - Math.PI / 2;
+        ctx.beginPath();
+        ctx.moveTo(clockX, clockY);
+        ctx.lineTo(clockX + Math.cos(minAngle) * (clockRadius * 0.62), clockY + Math.sin(minAngle) * (clockRadius * 0.62));
+        ctx.stroke();
+        
+        ctx.strokeStyle = '#dc2626';
+        ctx.lineWidth = 1;
+        const secAngle = (seconds / 60) * Math.PI * 2 - Math.PI / 2;
+        ctx.beginPath();
+        ctx.moveTo(clockX, clockY);
+        ctx.lineTo(clockX + Math.cos(secAngle) * (clockRadius * 0.72), clockY + Math.sin(secAngle) * (clockRadius * 0.72));
+        ctx.stroke();
+        
+        ctx.fillStyle = '#dc2626';
+        ctx.beginPath();
+        ctx.arc(clockX, clockY, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Floor
+        const floorGradient = ctx.createLinearGradient(0, floorY, 0, height);
+        floorGradient.addColorStop(0, '#a67c52');
+        floorGradient.addColorStop(0.3, '#8b6914');
+        floorGradient.addColorStop(1, '#6b4f12');
+        ctx.fillStyle = floorGradient;
+        ctx.fillRect(0, floorY, width, floorH);
+        
+        ctx.strokeStyle = '#5a3e1b';
+        ctx.lineWidth = 2;
+        const plankWidth = 100;
+        for (let x = 0; x < width; x += plankWidth) {
+            ctx.beginPath();
+            ctx.moveTo(x, floorY);
+            ctx.lineTo(x, height);
+            ctx.stroke();
+        }
+        
+        // Bulletin board — right side, only if it fits above wainscot
+        const bbWidth = Math.round(Math.min(100, width * 0.15));
+        const bbHeight = Math.round(bbWidth * 0.8);
+        const bbX = width - bbWidth - 20;
+        const bbY = boardY + boardHeight + 30;
+        
+        if (bbY + bbHeight < wainscotY - 10) {
+            ctx.fillStyle = '#c4a35a';
+            ctx.fillRect(bbX, bbY, bbWidth, bbHeight);
+            ctx.strokeStyle = '#8b6914';
+            ctx.lineWidth = 6;
+            ctx.strokeRect(bbX, bbY, bbWidth, bbHeight);
+        
+        const paperColors = ['#ffffff', '#fef3c7', '#fce7f3', '#d1fae5'];
+        paperColors.forEach((color, i) => {
+            ctx.fillStyle = color;
+            const px = bbX + 10 + (i % 2) * Math.round(bbWidth * 0.45);
+            const py = bbY + 10 + Math.floor(i / 2) * Math.round(bbHeight * 0.44);
+            ctx.save();
+            ctx.translate(px + 15, py + 15);
+            ctx.rotate((i - 1.5) * 0.1);
+            ctx.fillRect(-15, -15, 35, 30);
+            ctx.restore();
+            ctx.fillStyle = '#dc2626';
+            ctx.beginPath();
+            ctx.arc(px + 15, py + 5, 4, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        } // end bulletin board if
+    } // end drawClassroom
+
+    initMenu();
+</script>
+
+</body>
+</html>

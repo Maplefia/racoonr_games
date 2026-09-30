@@ -1,0 +1,1851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recycle Climb</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: linear-gradient(to top, #87CEEB 0%, #4A90D9 50%, #1E5AAF 100%);
+            touch-action: none;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+        }
+        canvas { display: block; }
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; display: flex; flex-direction: column;
+            justify-content: space-between; padding: 20px;
+        }
+        .hud-text {
+            font-weight: 900; text-shadow: 2px 2px 0 #000, -1px -1px 0 #000;
+        }
+        #screens {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 20;
+        }
+        .screen {
+            display: none; position: absolute; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); color: white;
+            flex-direction: column; align-items: center; justify-content: center;
+            pointer-events: auto; backdrop-filter: blur(5px);
+        }
+        .char-grid {
+            display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-top: 20px;
+        }
+        @media (min-width: 640px) { .char-grid { grid-template-columns: repeat(4, 1fr); } }
+        
+        .char-card {
+            background: rgba(255, 255, 255, 0.1); border: 2px solid transparent;
+            border-radius: 12px; padding: 15px; cursor: pointer; transition: all 0.2s;
+            text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        }
+        .char-card:hover {
+            background: rgba(255, 255, 255, 0.25); transform: translateY(-5px); border-color: #fff;
+        }
+        
+        /* Wind Warning - Hazard Symbol */
+        .wind-warning {
+            position: absolute; top: 45%; 
+            font-size: 14px; font-weight: bold; color: #000;
+            background: #FFD700;
+            width: 40px; height: 40px;
+            display: none; align-items: center; justify-content: center;
+            animation: pulse 0.4s infinite;
+            clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+        }
+        .wind-warning::after {
+            content: "!";
+            font-size: 20px;
+            font-weight: 900;
+            margin-top: 8px;
+        }
+        @keyframes pulse { 
+            0%, 100% { opacity: 1; transform: scale(1); } 
+            50% { opacity: 0.7; transform: scale(1.1); } 
+        }
+        #wind-left { left: 20px; }
+        #wind-right { right: 20px; }
+        
+        /* Mobile hint */
+        #mobile-hint {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.5);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 12px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="screens">
+        <!-- Character Select -->
+        <div id="character-select" class="screen" style="display: flex;">
+            <h1 class="text-4xl font-bold text-white mb-2 drop-shadow-lg">Infinite Recycle Climb</h1>
+            <p class="text-white/80 mb-4">Choose your Recycler</p>
+            <div class="char-grid" id="char-grid"></div>
+            <p class="text-white/50 text-sm mt-6" id="controls-hint">Use ARROW KEYS or WASD to move • Double Jump enabled!</p>
+        </div>
+
+        <!-- Game Over -->
+        <div id="game-over" class="screen">
+            <h1 class="text-6xl font-black text-red-500 mb-4 drop-shadow-md">GAME OVER</h1>
+            <div class="bg-white/10 p-8 rounded-xl text-center mb-8 border border-white/20">
+                <p class="text-sm text-gray-300 uppercase tracking-widest mb-1">Max Height This Run</p>
+                <p class="text-5xl font-bold text-yellow-400 mb-6" id="final-score">0m</p>
+                
+                <div class="border-t border-white/20 pt-4">
+                    <span class="text-gray-400 block text-sm">All-Time Best</span>
+                    <span class="text-white font-bold text-2xl" id="best-score">0m</span>
+                </div>
+            </div>
+            <button onclick="resetGame()" class="px-10 py-4 bg-gradient-to-r from-green-500 to-green-700 hover:from-green-400 hover:to-green-600 rounded-full font-bold text-xl transition cursor-pointer shadow-lg transform hover:scale-105">Try Again</button>
+        </div>
+    </div>
+
+    <!-- HUD -->
+    <div id="ui-layer">
+        <div class="flex justify-between w-full max-w-6xl mx-auto items-start">
+            <div>
+                <div class="text-white text-3xl hud-text" id="altitude-display">0m</div>
+                <div class="text-white/60 text-xs font-bold uppercase tracking-wider">Altitude</div> 
+                <button id="music-toggle" onclick="toggleMusic()" class="pointer-events-auto bg-white/20 hover:bg-white/30 rounded-full w-10 h-10 text-xl transition cursor-pointer">🔇</button>
+            </div>
+        </div>
+        
+        <!-- Wind Warning Indicators (hazard triangles) -->
+        <div id="wind-left" class="wind-warning"></div>
+        <div id="wind-right" class="wind-warning"></div>
+        
+        <div id="mobile-hint">Tilt to move • Tap to jump</div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // --- Config & State ---
+        let gameActive = false;
+        let currentAltitude = 0;
+        let maxAltitude = 0;
+        let globalHighScore = parseInt(localStorage.getItem('recycle_high_score')) || 0;
+        let cameraY = 0;
+        const PLAYER_SCREEN_Y = 0.5;
+
+        // Physics
+        const GRAVITY = 0.5;
+        const FRICTION = 0.85;
+        
+        // Floor tracking for death detection
+        let lowestPlatformY = 0;
+        let deathY = 0;
+        let isDying = false;
+        let deathTimer = 0;
+        
+        // Starting position reference
+        let startingY = 0;
+        let groundY = 0;
+
+        // Wind System
+        const WIND_CYCLE = {
+            state: 'idle',
+            timer: 0,
+            force: 0,
+            direction: 1,
+            cooldown: 0
+        };
+
+        // Mobile Controls
+        let isMobile = false;
+        let gyroWorking = false;
+        let tiltX = 0;
+        let touchJump = false;
+        // Virtual joystick state
+        let vjoy = { active: false, startX: 0, currentX: 0, id: null };
+
+        // Entities
+        let platforms = [];
+        let enemies = [];
+        let powerups = [];
+        let clouds = [];
+        let particles = [];
+        let plasticBags = []; // Wind-only visual
+        let keys = {};
+
+        // --- Audio System ---
+        let audioCtx = null;
+        let musicGain = null;
+        let sfxGain = null;
+        let musicPlaying = false;
+        let musicNodes = [];
+        let musicTimeoutId = null;
+
+        function initAudio() {
+            if (audioCtx) return;
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            
+            // Master gains
+            musicGain = audioCtx.createGain();
+            musicGain.gain.value = 0.3;
+            musicGain.connect(audioCtx.destination);
+            
+            sfxGain = audioCtx.createGain();
+            sfxGain.gain.value = 0.5;
+            sfxGain.connect(audioCtx.destination);
+        }
+
+        // Ensure audio context is ready and resumed
+        function ensureAudioReady() {
+            if (!audioCtx) {
+                initAudio();
+            }
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            return audioCtx !== null;
+        }
+
+        function playJumpSound() {
+            if (!ensureAudioReady()) return;
+            
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.1);
+            
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+            
+            osc.connect(gain);
+            gain.connect(sfxGain);
+            
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.15);
+        }
+
+        function playDeathSound() {
+            if (!ensureAudioReady()) return;
+            
+            // Sad descending tone
+            const osc1 = audioCtx.createOscillator();
+            const osc2 = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            osc1.type = 'triangle';
+            osc2.type = 'sine';
+            
+            osc1.frequency.setValueAtTime(400, audioCtx.currentTime);
+            osc1.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.8);
+            
+            osc2.frequency.setValueAtTime(200, audioCtx.currentTime);
+            osc2.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.8);
+            
+            gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.8);
+            
+            osc1.connect(gain);
+            osc2.connect(gain);
+            gain.connect(sfxGain);
+            
+            osc1.start();
+            osc2.start();
+            osc1.stop(audioCtx.currentTime + 0.8);
+            osc2.stop(audioCtx.currentTime + 0.8);
+        }
+
+        function playWindSound() {
+            if (!ensureAudioReady()) return;
+            
+            // White noise filtered to sound like wind
+            const bufferSize = audioCtx.sampleRate * 5;
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = Math.random() * 2 - 1;
+            }
+            
+            const noise = audioCtx.createBufferSource();
+            noise.buffer = buffer;
+            
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'bandpass';
+            filter.frequency.value = 800;
+            filter.Q.value = 0.5;
+            
+            // Modulate the filter for a whooshing effect
+            filter.frequency.setValueAtTime(400, audioCtx.currentTime);
+            filter.frequency.linearRampToValueAtTime(1200, audioCtx.currentTime + 2);
+            filter.frequency.linearRampToValueAtTime(600, audioCtx.currentTime + 5);
+            
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.15, audioCtx.currentTime + 0.5);
+            gain.gain.setValueAtTime(0.15, audioCtx.currentTime + 4);
+            gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 5);
+            
+            noise.connect(filter);
+            filter.connect(gain);
+            gain.connect(sfxGain);
+            
+            noise.start();
+            noise.stop(audioCtx.currentTime + 5);
+        }
+
+        function playPowerupSound() {
+            if (!ensureAudioReady()) return;
+            
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            osc.type = 'sine';
+            
+            // Ascending arpeggio
+            const now = audioCtx.currentTime;
+            osc.frequency.setValueAtTime(523, now);        // C5
+            osc.frequency.setValueAtTime(659, now + 0.08); // E5
+            osc.frequency.setValueAtTime(784, now + 0.16); // G5
+            osc.frequency.setValueAtTime(1047, now + 0.24); // C6
+            
+            gain.gain.setValueAtTime(0.3, now);
+            gain.gain.setValueAtTime(0.3, now + 0.28);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+            
+            osc.connect(gain);
+            gain.connect(sfxGain);
+            
+            osc.start();
+            osc.stop(now + 0.4);
+        }
+
+        function startBackgroundMusic() {
+            if (!ensureAudioReady()) return;
+            if (musicPlaying) return;
+            musicPlaying = true;
+            
+            // Restore music gain volume
+            if (musicGain) {
+                musicGain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            }
+            
+            // Ambient generative music
+            function playNote(freq, startTime, duration, type = 'sine', volume = 0.15) {
+                if (!audioCtx || !musicPlaying) return;
+                
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                
+                osc.type = type;
+                osc.frequency.value = freq;
+                
+                gain.gain.setValueAtTime(0, startTime);
+                gain.gain.linearRampToValueAtTime(volume, startTime + 0.1);
+                gain.gain.setValueAtTime(volume, startTime + duration - 0.2);
+                gain.gain.linearRampToValueAtTime(0, startTime + duration);
+                
+                osc.connect(gain);
+                gain.connect(musicGain);
+                
+                osc.start(startTime);
+                osc.stop(startTime + duration);
+                
+                musicNodes.push({ osc, gain });
+            }
+            
+            // Pentatonic scale for pleasant ambient feel
+            const scale = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25];
+            
+            function scheduleLoop() {
+                if (!musicPlaying || !audioCtx) return;
+                
+                const now = audioCtx.currentTime;
+                
+                // Bass drone
+                playNote(130.81, now, 8, 'triangle', 0.1); // C3
+                
+                // Ambient pads
+                for (let i = 0; i < 4; i++) {
+                    const note = scale[Math.floor(Math.random() * scale.length)];
+                    const start = now + i * 2 + Math.random() * 0.5;
+                    playNote(note, start, 3 + Math.random() * 2, 'sine', 0.08);
+                }
+                
+                // High twinkles
+                for (let i = 0; i < 3; i++) {
+                    const note = scale[4 + Math.floor(Math.random() * 4)];
+                    const start = now + Math.random() * 7;
+                    playNote(note, start, 0.5 + Math.random() * 0.5, 'sine', 0.05);
+                }
+                
+                // Clean up old nodes
+                musicNodes = musicNodes.filter(n => {
+                    try {
+                        return n.osc.context.currentTime < n.osc.stopTime;
+                    } catch {
+                        return false;
+                    }
+                });
+                
+                // Schedule next loop
+                musicTimeoutId = setTimeout(scheduleLoop, 7500);
+            }
+            
+            scheduleLoop();
+            updateMusicButton();
+        }
+
+        function stopBackgroundMusic() {
+            musicPlaying = false;
+            
+            // Clear pending timeout
+            if (musicTimeoutId) {
+                clearTimeout(musicTimeoutId);
+                musicTimeoutId = null;
+            }
+            
+            // Immediately mute the music gain node (this stops all sound instantly)
+            if (musicGain && audioCtx) {
+                musicGain.gain.cancelScheduledValues(audioCtx.currentTime);
+                musicGain.gain.setValueAtTime(0, audioCtx.currentTime);
+            }
+            
+            // Stop all current nodes
+            if (audioCtx) {
+                musicNodes.forEach(n => {
+                    try {
+                        n.osc.stop(audioCtx.currentTime + 0.1);
+                    } catch {}
+                });
+            }
+            musicNodes = [];
+            updateMusicButton();
+        }   
+
+        function toggleMusic() {
+            // Initialize audio on button click (user interaction)
+            ensureAudioReady();
+            
+            if (musicPlaying) {
+                stopBackgroundMusic();
+            } else {
+                startBackgroundMusic();
+            }
+        }
+
+        function updateMusicButton() {
+            const btn = document.getElementById('music-toggle');
+            if (btn) {
+                btn.textContent = musicPlaying ? '🔊' : '🔇';
+            }
+        }
+                
+        // Active power-up effects
+        let activePowerups = {
+            shield: false,
+            jetpack: 0,
+            springNext: false
+        };
+        
+        const CHARACTERS = [
+            { 
+                name: "Classic Bin", color: "#2E8B57", lidColor: "#3CB371", 
+                desc: "Balanced & Reliable.", 
+                stats: { speed: 1.0, jump: -13, gravity: 0.5, jumps: 2 } 
+            },
+            { 
+                name: "Aero Plastic", color: "#FF6347", lidColor: "#FF7F50", 
+                desc: "Floaty & Lightweight.", 
+                stats: { speed: 1.1, jump: -14, gravity: 0.38, jumps: 2 } 
+            },
+            { 
+                name: "Heavy Compost", color: "#8B4513", lidColor: "#A0522D", 
+                desc: "Falls fast, grips well.", 
+                stats: { speed: 1.3, jump: -12, gravity: 0.65, jumps: 2 } 
+            },
+            { 
+                name: "E-Bot 3000", color: "#4B0082", lidColor: "#9932CC", 
+                desc: "Triple Jump Tech.", 
+                stats: { speed: 0.9, jump: -11, gravity: 0.5, jumps: 3 } 
+            }
+        ];
+
+        let player = {
+            x: 0, y: 0, w: 30, h: 30, vx: 0, vy: 0,
+            color: '', lidColor: '',
+            onGround: false, facingRight: true, jumpCount: 0,
+            stats: {},
+            platform: null
+        };
+
+        // --- Initialization ---
+
+        let orientationListenerAdded = false;
+        
+        function detectMobile() {
+            // Broad touch/mobile detection — catches phones, tablets, iPads, Surface in tablet mode
+            isMobile = ('ontouchstart' in window)
+                    || (navigator.maxTouchPoints > 0)
+                    || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+                    || (navigator.userAgent.includes('Windows') && navigator.maxTouchPoints > 1); // Surface
+            
+            if (isMobile) {
+                document.getElementById('controls-hint').textContent = 'Tilt to move • Tap to jump (or use on-screen controls)';
+                document.getElementById('mobile-hint').style.display = 'block';
+                
+                // Attach gyroscope if available (non-iOS13+ path)
+                if (typeof DeviceOrientationEvent !== 'undefined') {
+                    if (typeof DeviceOrientationEvent.requestPermission !== 'function') {
+                        window.addEventListener('deviceorientation', handleOrientation);
+                        orientationListenerAdded = true;
+                    }
+                    // iOS 13+ permission requested on character select tap
+                }
+                
+                // Always set up touch controls (used as fallback joystick if gyro doesn't work)
+                canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+                canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+                canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+                
+                // Inject joystick hidden — revealed after character select if gyro unavailable
+                showVirtualJoystick(false);
+            }
+        }
+
+        function showVirtualJoystick(visible = true) {
+            // Only inject once
+            if (document.getElementById('vjoy-container')) return;
+            const div = document.createElement('div');
+            div.id = 'vjoy-container';
+            div.style.cssText = `
+                position: fixed; bottom: 20px; left: 0; width: 100%; 
+                display: ${visible ? 'flex' : 'none'}; justify-content: space-between; align-items: flex-end;
+                padding: 0 20px; box-sizing: border-box; pointer-events: none; z-index: 50;
+            `;
+            div.innerHTML = `
+                <div id="vjoy-stick" style="
+                    width: 110px; height: 110px; border-radius: 50%;
+                    background: rgba(255,255,255,0.15); border: 3px solid rgba(255,255,255,0.4);
+                    display: flex; align-items: center; justify-content: center;
+                    pointer-events: auto; touch-action: none; position: relative;
+                ">
+                    <div id="vjoy-knob" style="
+                        width: 48px; height: 48px; border-radius: 50%;
+                        background: rgba(255,255,255,0.55); pointer-events: none;
+                        transition: transform 0.05s;
+                    "></div>
+                    <div style="position:absolute; bottom:-22px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,0.5); font-size:11px; white-space:nowrap;">Move</div>
+                </div>
+                <div id="vjoy-jump" style="
+                    width: 80px; height: 80px; border-radius: 50%;
+                    background: rgba(100,220,100,0.25); border: 3px solid rgba(100,255,100,0.5);
+                    display: flex; align-items: center; justify-content: center;
+                    pointer-events: auto; touch-action: none; color: rgba(255,255,255,0.8);
+                    font-size: 28px; user-select: none;
+                ">🦘</div>
+            `;
+            document.body.appendChild(div);
+
+            const stick = document.getElementById('vjoy-stick');
+            const jump  = document.getElementById('vjoy-jump');
+
+            stick.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                ensureAudioReady();
+                const t = e.changedTouches[0];
+                vjoy.active = true;
+                vjoy.id = t.identifier;
+                vjoy.startX = t.clientX;
+                vjoy.currentX = t.clientX;
+            }, { passive: false });
+
+            stick.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                for (let t of e.changedTouches) {
+                    if (t.identifier === vjoy.id) {
+                        vjoy.currentX = t.clientX;
+                        const dx = Math.max(-50, Math.min(50, vjoy.currentX - vjoy.startX));
+                        document.getElementById('vjoy-knob').style.transform = `translateX(${dx}px)`;
+                        // Only override tiltX if gyro isn't working
+                        if (!gyroWorking) {
+                            tiltX = dx / 16; // map ±50px → ±3
+                        }
+                    }
+                }
+            }, { passive: false });
+
+            stick.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                vjoy.active = false;
+                vjoy.id = null;
+                document.getElementById('vjoy-knob').style.transform = 'translateX(0)';
+                if (!gyroWorking) tiltX = 0;
+            }, { passive: false });
+
+            jump.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                ensureAudioReady();
+                if (gameActive) touchJump = true;
+            }, { passive: false });
+
+            jump.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                touchJump = false;
+                keys.jumpLocked = false;
+            }, { passive: false });
+        }
+
+        async function requestOrientationPermission() {
+            if (orientationListenerAdded) return true;
+            
+            if (typeof DeviceOrientationEvent !== 'undefined' && 
+                typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try {
+                    const response = await DeviceOrientationEvent.requestPermission();
+                    if (response === 'granted') {
+                        window.addEventListener('deviceorientation', handleOrientation);
+                        orientationListenerAdded = true;
+                        return true;
+                    } else {
+                        console.warn('Device orientation permission denied — using touch joystick');
+                        return false;
+                    }
+                } catch (err) {
+                    console.error('Error requesting orientation permission:', err);
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        function handleOrientation(e) {
+            if (!gameActive) return;
+            let tilt = null;
+            if (e.gamma !== null && e.gamma !== undefined) {
+                tilt = e.gamma;
+            } else if (e.beta !== null && e.beta !== undefined) {
+                tilt = e.beta;
+            }
+            if (tilt !== null) {
+                if (!gyroWorking) {
+                    gyroWorking = true;
+                    // Hide joystick — gyro is available
+                    const vjoy = document.getElementById('vjoy-container');
+                    if (vjoy) vjoy.style.display = 'none';
+                }
+                tiltX = Math.max(-3, Math.min(3, tilt / 30));
+            }
+        }
+
+        function handleTouchStart(e) {
+            e.preventDefault();
+            ensureAudioReady();
+            if (!gameActive) return;
+            // Tap on canvas (not the vjoy overlay) triggers jump
+            touchJump = true;
+        }
+
+        function handleTouchMove(e) {
+            e.preventDefault();
+        }
+
+        function handleTouchEnd(e) {
+            e.preventDefault();
+            touchJump = false;
+            keys.jumpLocked = false;
+        }
+
+        function initCharSelect() {
+            const grid = document.getElementById('char-grid');
+            grid.innerHTML = '';
+            CHARACTERS.forEach((char, index) => {
+                const card = document.createElement('div');
+                card.className = 'char-card';
+                card.onclick = () => selectCharacter(index);
+                card.innerHTML = `
+                    <div style="width:40px; height:40px; background:${char.color}; margin:0 auto 10px; border-radius:4px; position:relative;">
+                        <div style="background:${char.lidColor}; height:6px; width:44px; margin-left:-2px; position:absolute; top:-4px; border-radius: 2px;"></div>
+                        <div style="background:${char.lidColor}; height:4px; width:8px; margin-left:16px; position:absolute; top:-8px; border-radius: 2px;"></div>
+                    </div>
+                    <h3 class="font-bold text-lg text-white">${char.name}</h3>
+                    <p class="text-xs text-white/70 mb-2">${char.desc}</p>
+                `;
+                grid.appendChild(card);
+            });
+            document.getElementById('best-score').innerText = Math.floor(globalHighScore) + "m";
+            detectMobile();
+        }
+
+        async function selectCharacter(index) {
+            // Initialize audio on user interaction (required by browsers)
+            ensureAudioReady();
+            
+            // Request orientation permission on iOS (must be from user gesture)
+            if (isMobile) {
+                await requestOrientationPermission();
+            }
+            
+            const char = CHARACTERS[index];
+            player.color = char.color;
+            player.lidColor = char.lidColor;
+            player.stats = { ...char.stats };
+            document.getElementById('character-select').style.display = 'none';
+            document.getElementById('mobile-hint').style.display = 'none';
+            
+            // Start music when game begins
+            startBackgroundMusic();
+            
+            // After permission is resolved, wait briefly to see if gyro fires.
+            // If not, show the joystick fallback.
+            if (isMobile) {
+                setTimeout(() => {
+                    if (!gyroWorking) {
+                        const vjoy = document.getElementById('vjoy-container');
+                        if (vjoy) vjoy.style.display = 'flex';
+                    }
+                }, 800);
+            }
+            
+            resetGame();
+        }
+
+        function resetGame() {
+            groundY = canvas.height - 50;
+            startingY = canvas.height - 100;
+            
+            player.x = canvas.width / 2 - 15;
+            player.y = startingY;
+            player.vx = 0; 
+            player.vy = 0;
+            player.jumpCount = 0;
+            player.platform = null;
+            player.onGround = false;
+            player.facingRight = true;
+
+            currentAltitude = 0;
+            maxAltitude = 0;
+            isDying = false;
+            deathTimer = 0;
+            
+            // Camera starts showing ground at bottom
+            cameraY = groundY - canvas.height + 100;
+
+            platforms = [];
+            enemies = [];
+            powerups = [];
+            particles = [];
+            plasticBags = [];
+            
+            // Reset power-up effects
+            activePowerups = { shield: false, jetpack: 0, springNext: false };
+            
+            WIND_CYCLE.state = 'idle';
+            WIND_CYCLE.timer = 0;
+            WIND_CYCLE.force = 0;
+            WIND_CYCLE.cooldown = 0;
+            
+            initClouds();
+            
+            // Base Platform
+            platforms.push(new Platform(0, groundY, canvas.width, 50, 'static'));
+            lowestPlatformY = groundY;
+            
+            // Generate initial platforms
+            generatePlatforms(groundY);
+
+            gameActive = true;
+            document.getElementById('game-over').style.display = 'none';
+            document.getElementById('ui-layer').style.opacity = '1';
+            
+            // Resume music if it was playing
+            if (!musicPlaying) {
+                startBackgroundMusic();
+            }
+        }
+
+        function initClouds() {
+            clouds = [];
+            for(let i = 0; i < 25; i++) {
+                clouds.push({
+                    x: Math.random() * (canvas.width + 200) - 100,
+                    baseY: -i * 300 + Math.random() * 200,
+                    size: Math.random() * 0.6 + 0.4,
+                    speed: Math.random() * 0.3 + 0.1,
+                    opacity: Math.random() * 0.3 + 0.2
+                });
+            }
+        }
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        window.addEventListener('keydown', e => { 
+            if(gameActive) keys[e.key] = true; 
+            if(['ArrowUp', 'ArrowDown', ' '].includes(e.key)) e.preventDefault();
+        });
+        window.addEventListener('keyup', e => { 
+            if(gameActive) keys[e.key] = false; 
+        });
+
+        // --- Helper: Draw rounded rect (compatibility) ---
+        function drawRoundedRect(ctx, x, y, w, h, r) {
+            if (typeof r === 'number') r = [r, r, r, r];
+            ctx.beginPath();
+            ctx.moveTo(x + r[0], y);
+            ctx.lineTo(x + w - r[1], y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r[1]);
+            ctx.lineTo(x + w, y + h - r[2]);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r[2], y + h);
+            ctx.lineTo(x + r[3], y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r[3]);
+            ctx.lineTo(x, y + r[0]);
+            ctx.quadraticCurveTo(x, y, x + r[0], y);
+            ctx.closePath();
+        }
+
+        // --- Classes ---
+
+        class Platform {
+            constructor(x, y, w, h, type) {
+                this.x = x; 
+                this.y = y; 
+                this.w = w; 
+                this.h = h;
+                this.type = type;
+                this.dx = 0;
+                
+                this.startX = x;
+                this.moveRange = 80 + Math.random() * 80;
+                this.moveSpeed = (Math.random() * 1.5 + 0.8) * (Math.random() > 0.5 ? 1 : -1);
+                
+                // Conveyor direction - random left or right
+                this.conveyorDir = Math.random() > 0.5 ? 1 : -1;
+                
+                this.visible = true;
+                this.fading = false;
+                this.fadeTimer = 0;
+                this.cycleTime = Math.random() * 150 + 150;
+            }
+
+            update() {
+                this.dx = 0;
+
+                if (this.type === 'moving') {
+                    let prevX = this.x;
+                    this.x += this.moveSpeed;
+                    if (this.x > this.startX + this.moveRange || this.x < this.startX - this.moveRange) {
+                        this.moveSpeed *= -1;
+                    }
+                    this.dx = this.x - prevX;
+                }
+
+                if (this.type === 'disappearing') {
+                    this.cycleTime--;
+                    if (this.cycleTime <= 0) {
+                        if (this.visible && !this.fading) {
+                            this.fading = true;
+                            this.fadeTimer = 90;
+                        } else if (this.fading) {
+                            this.fadeTimer--;
+                            if (this.fadeTimer <= 0) {
+                                this.visible = false;
+                                this.fading = false;
+                                this.cycleTime = 150;
+                            }
+                        } else {
+                            this.visible = true;
+                            this.cycleTime = 250 + Math.random() * 100;
+                        }
+                    }
+                }
+            }
+
+            draw(ctx, camY) {
+                if (!this.visible) return;
+
+                let drawY = this.y - camY;
+
+                if (this.fading) {
+                    ctx.globalAlpha = (Math.floor(Date.now() / 80) % 2 === 0) ? 0.4 : 0.9;
+                }
+
+                let mainColor, highlightColor;
+                switch(this.type) {
+                    case 'static':
+                        mainColor = '#6B4423'; highlightColor = '#8B5A2B'; break;
+                    case 'moving':
+                        mainColor = '#4A6B8A'; highlightColor = '#5A8AB4'; break;
+                    case 'slippery':
+                        mainColor = '#89CFF0'; highlightColor = '#B0E2FF'; break;
+                    case 'disappearing':
+                        mainColor = '#228B22'; highlightColor = '#32CD32'; break;
+                    case 'conveyor':
+                        mainColor = '#555555'; highlightColor = '#777777'; break;
+                    default:
+                        mainColor = '#6B4423'; highlightColor = '#8B5A2B';
+                }
+
+                // Shadow
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                drawRoundedRect(ctx, this.x + 3, drawY + 3, this.w, this.h, 6);
+                ctx.fill();
+
+                // Main Block
+                ctx.fillStyle = mainColor;
+                drawRoundedRect(ctx, this.x, drawY, this.w, this.h, 6);
+                ctx.fill();
+
+                // Top Highlight
+                ctx.fillStyle = highlightColor;
+                drawRoundedRect(ctx, this.x, drawY, this.w, this.h * 0.4, [6, 6, 0, 0]);
+                ctx.fill();
+
+                // Type-specific details
+                if (this.type === 'moving') {
+                    ctx.fillStyle = "rgba(255,255,255,0.3)";
+                    ctx.beginPath();
+                    ctx.moveTo(this.x + 8, drawY + this.h/2);
+                    ctx.lineTo(this.x + 14, drawY + 4);
+                    ctx.lineTo(this.x + 14, drawY + this.h - 4);
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.moveTo(this.x + this.w - 8, drawY + this.h/2);
+                    ctx.lineTo(this.x + this.w - 14, drawY + 4);
+                    ctx.lineTo(this.x + this.w - 14, drawY + this.h - 4);
+                    ctx.fill();
+                }
+                
+                if (this.type === 'conveyor') {
+                    ctx.fillStyle = "rgba(255,255,0,0.4)";
+                    let offset = (Date.now() / 20 * this.conveyorDir) % 20;
+                    if (offset < 0) offset += 20;
+                    for(let i = 0; i < this.w - 10; i += 20) {
+                        let arrowX = this.x + 5 + ((i + offset) % (this.w - 10));
+                        ctx.beginPath();
+                        if (this.conveyorDir > 0) {
+                            ctx.moveTo(arrowX + 6, drawY + this.h/2);
+                            ctx.lineTo(arrowX, drawY + 4);
+                            ctx.lineTo(arrowX, drawY + this.h - 4);
+                        } else {
+                            ctx.moveTo(arrowX, drawY + this.h/2);
+                            ctx.lineTo(arrowX + 6, drawY + 4);
+                            ctx.lineTo(arrowX + 6, drawY + this.h - 4);
+                        }
+                        ctx.fill();
+                    }
+                }
+                
+                if (this.type === 'slippery') {
+                    ctx.fillStyle = "rgba(255,255,255,0.5)";
+                    ctx.beginPath();
+                    ctx.moveTo(this.x + 10, drawY);
+                    ctx.lineTo(this.x + 25, drawY);
+                    ctx.lineTo(this.x + 15, drawY + this.h);
+                    ctx.lineTo(this.x, drawY + this.h);
+                    ctx.fill();
+                }
+
+                ctx.globalAlpha = 1.0;
+            }
+        }
+
+        class Enemy {
+            constructor(x, y, range, type) {
+                this.x = x; 
+                this.y = y; 
+                this.startX = x;
+                this.range = range; 
+                this.type = type; // 'glass', 'banana', 'fly'
+                this.speed = type === 'banana' ? 0 : (Math.random() * 1.2 + 0.6) * (Math.random() > 0.5 ? 1 : -1);
+                this.w = type === 'glass' ? 30 : 24; 
+                this.h = type === 'glass' ? 20 : (type === 'banana' ? 12 : 24);
+                this.angle = Math.random() * Math.PI * 2;
+                this.shardAngles = [Math.random() * 0.5 - 0.25, Math.random() * 0.5 - 0.25, Math.random() * 0.5 - 0.25];
+            }
+
+            update() {
+                if (this.type !== 'banana') {
+                    this.x += this.speed;
+                    if (this.x > this.startX + this.range || this.x < this.startX) {
+                        this.speed *= -1;
+                    }
+                }
+
+                if (this.type === 'fly') {
+                    this.angle += 0.08;
+                    this.y += Math.sin(this.angle) * 0.4;
+                }
+            }
+
+            draw(ctx, camY) {
+                let drawY = this.y - camY;
+                
+                if (this.type === 'glass') {
+                    // Broken glass shards
+                    ctx.fillStyle = "rgba(200, 230, 255, 0.7)";
+                    ctx.strokeStyle = "rgba(150, 200, 255, 0.9)";
+                    ctx.lineWidth = 1;
+                    
+                    // Draw multiple shards
+                    for (let i = 0; i < 3; i++) {
+                        ctx.save();
+                        ctx.translate(this.x + 8 + i * 8, drawY + 10);
+                        ctx.rotate(this.shardAngles[i]);
+                        ctx.beginPath();
+                        ctx.moveTo(0, -8);
+                        ctx.lineTo(5, 0);
+                        ctx.lineTo(2, 8);
+                        ctx.lineTo(-3, 6);
+                        ctx.lineTo(-4, -2);
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.stroke();
+                        ctx.restore();
+                    }
+                    
+                    // Danger sparkle
+                    ctx.fillStyle = "white";
+                    let sparkle = Math.sin(Date.now() / 100) * 0.5 + 0.5;
+                    ctx.globalAlpha = sparkle;
+                    ctx.beginPath();
+                    ctx.arc(this.x + 15, drawY + 5, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.globalAlpha = 1;
+                    
+                } else if (this.type === 'banana') {
+                    // Banana peel
+                    ctx.fillStyle = "#FFE135";
+                    ctx.beginPath();
+                    ctx.ellipse(this.x + 12, drawY + 6, 12, 5, 0.2, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Peel parts sticking up
+                    ctx.fillStyle = "#E6C700";
+                    ctx.beginPath();
+                    ctx.moveTo(this.x + 5, drawY + 6);
+                    ctx.quadraticCurveTo(this.x, drawY - 5, this.x + 8, drawY);
+                    ctx.lineTo(this.x + 10, drawY + 4);
+                    ctx.fill();
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(this.x + 19, drawY + 6);
+                    ctx.quadraticCurveTo(this.x + 24, drawY - 5, this.x + 16, drawY);
+                    ctx.lineTo(this.x + 14, drawY + 4);
+                    ctx.fill();
+                    
+                    // Brown tip
+                    ctx.fillStyle = "#8B4513";
+                    ctx.beginPath();
+                    ctx.arc(this.x + 22, drawY + 5, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                } else if (this.type === 'fly') {
+                    // Fly
+                    ctx.fillStyle = "#1a1a1a";
+                    ctx.beginPath();
+                    ctx.ellipse(this.x + 12, drawY + 14, 7, 9, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Head
+                    ctx.beginPath();
+                    ctx.arc(this.x + 12, drawY + 4, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Wings
+                    ctx.fillStyle = "rgba(200, 220, 255, 0.7)";
+                    let wingAngle = Math.sin(Date.now() / 30) * 0.3;
+                    ctx.save();
+                    ctx.translate(this.x + 12, drawY + 10);
+                    ctx.rotate(wingAngle);
+                    ctx.beginPath();
+                    ctx.ellipse(-10, 0, 10, 5, -0.3, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.rotate(-wingAngle * 2);
+                    ctx.beginPath();
+                    ctx.ellipse(10, 0, 10, 5, 0.3, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                    
+                    // Eyes
+                    ctx.fillStyle = "#ff0000";
+                    ctx.beginPath();
+                    ctx.arc(this.x + 9, drawY + 3, 2, 0, Math.PI * 2);
+                    ctx.arc(this.x + 15, drawY + 3, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+
+        class PowerUp {
+            constructor(x, y, type) {
+                this.x = x;
+                this.y = y;
+                this.type = type; // 'spring', 'jetpack', 'shield'
+                this.w = 25;
+                this.h = 25;
+                this.bobOffset = Math.random() * Math.PI * 2;
+                this.collected = false;
+            }
+
+            update() {
+                this.bobOffset += 0.05;
+            }
+
+            draw(ctx, camY) {
+                if (this.collected) return;
+                
+                let drawY = this.y - camY + Math.sin(this.bobOffset) * 3;
+                
+                // Glow effect
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = this.type === 'spring' ? '#00FF00' : 
+                                  this.type === 'jetpack' ? '#FF6600' : '#00FFFF';
+                
+                if (this.type === 'spring') {
+                    // Spring coil
+                    ctx.strokeStyle = '#00CC00';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    for (let i = 0; i < 4; i++) {
+                        ctx.moveTo(this.x + 5, drawY + 5 + i * 5);
+                        ctx.lineTo(this.x + 20, drawY + 5 + i * 5);
+                    }
+                    ctx.stroke();
+                    
+                    // Top plate
+                    ctx.fillStyle = '#00FF00';
+                    ctx.fillRect(this.x + 2, drawY, 21, 5);
+                    
+                } else if (this.type === 'jetpack') {
+                    // Jetpack body
+                    ctx.fillStyle = '#FF4400';
+                    drawRoundedRect(ctx, this.x + 5, drawY, 15, 20, 3);
+                    ctx.fill();
+                    
+                    // Flames
+                    ctx.fillStyle = '#FFFF00';
+                    let flicker = Math.sin(Date.now() / 50) * 2;
+                    ctx.beginPath();
+                    ctx.moveTo(this.x + 7, drawY + 20);
+                    ctx.lineTo(this.x + 12, drawY + 28 + flicker);
+                    ctx.lineTo(this.x + 18, drawY + 20);
+                    ctx.fill();
+                    
+                } else if (this.type === 'shield') {
+                    // Shield bubble
+                    ctx.strokeStyle = '#00FFFF';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(this.x + 12, drawY + 12, 12, 0, Math.PI * 2);
+                    ctx.stroke();
+                    
+                    // Inner star
+                    ctx.fillStyle = '#00FFFF';
+                    ctx.beginPath();
+                    ctx.arc(this.x + 12, drawY + 12, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                ctx.shadowBlur = 0;
+            }
+        }
+
+        class PlasticBag {
+            constructor(x, y, direction) {
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() * 3 + 2) * direction;
+                this.vy = Math.random() * 2 - 1;
+                this.rotation = Math.random() * Math.PI * 2;
+                this.rotationSpeed = (Math.random() - 0.5) * 0.1;
+                this.size = Math.random() * 0.5 + 0.5;
+                this.life = 200;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy + Math.sin(Date.now() / 200 + this.rotation) * 0.5;
+                this.rotation += this.rotationSpeed;
+                this.life--;
+            }
+
+            draw(ctx, camY) {
+                let drawY = this.y - camY;
+                
+                ctx.save();
+                ctx.translate(this.x, drawY);
+                ctx.rotate(this.rotation);
+                ctx.scale(this.size, this.size);
+                
+                // Plastic bag shape
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                ctx.strokeStyle = 'rgba(200, 200, 200, 0.6)';
+                ctx.lineWidth = 1;
+                
+                ctx.beginPath();
+                ctx.moveTo(0, -15);
+                ctx.quadraticCurveTo(-15, -10, -12, 5);
+                ctx.quadraticCurveTo(-10, 15, 0, 12);
+                ctx.quadraticCurveTo(10, 15, 12, 5);
+                ctx.quadraticCurveTo(15, -10, 0, -15);
+                ctx.fill();
+                ctx.stroke();
+                
+                // Handles
+                ctx.beginPath();
+                ctx.moveTo(-5, -15);
+                ctx.quadraticCurveTo(-8, -22, -3, -20);
+                ctx.moveTo(5, -15);
+                ctx.quadraticCurveTo(8, -22, 3, -20);
+                ctx.stroke();
+                
+                ctx.restore();
+            }
+        }
+
+        // --- Generation Logic ---
+
+        function getDifficultyParams(altitude) {
+            if (altitude < 500) return { types: ['static'], minW: 100, gap: 80, enemyChance: 0, powerupChance: 0 };
+            if (altitude < 1500) return { types: ['static', 'static', 'moving'], minW: 85, gap: 95, enemyChance: 0.08, powerupChance: 0.05 };
+            if (altitude < 3000) return { types: ['static', 'moving', 'slippery', 'disappearing'], minW: 70, gap: 110, enemyChance: 0.15, powerupChance: 0.08 };
+            if (altitude < 5000) return { types: ['static', 'moving', 'slippery', 'disappearing', 'conveyor'], minW: 60, gap: 120, enemyChance: 0.25, powerupChance: 0.1 };
+            return { types: ['moving', 'disappearing', 'conveyor', 'slippery'], minW: 50, gap: 135, enemyChance: 0.35, powerupChance: 0.12 };
+        }
+
+        function generatePlatforms(highestY) {
+            const params = getDifficultyParams(maxAltitude);
+            let y = highestY;
+
+            while (y > cameraY - canvas.height - 200) {
+                y -= params.gap + Math.random() * 30;
+                
+                let type = params.types[Math.floor(Math.random() * params.types.length)];
+                if (type === 'disappearing' && Math.random() > 0.5) type = 'static';
+
+                let w = params.minW + Math.random() * 70;
+                let x = Math.random() * (canvas.width - w);
+                
+                if (Math.random() < 0.25) {
+                    x = (canvas.width - w) / 2 + (Math.random() - 0.5) * 100;
+                }
+                x = Math.max(0, Math.min(canvas.width - w, x));
+
+                let p = new Platform(x, y, w, 18, type);
+                platforms.push(p);
+
+                // Spawn Enemy?
+                if (Math.random() < params.enemyChance && type === 'static') {
+                    let eTypes = ['glass', 'banana', 'fly'];
+                    let eType = eTypes[Math.floor(Math.random() * eTypes.length)];
+                    let ex = x + 10;
+                    let ey = y - (eType === 'fly' ? 50 : (eType === 'glass' ? 22 : 14));
+                    let eRange = Math.max(20, w - 40);
+                    enemies.push(new Enemy(ex, ey, eRange, eType));
+                }
+                
+                // Spawn Power-up?
+                if (Math.random() < params.powerupChance) {
+                    let pTypes = ['spring', 'jetpack', 'shield'];
+                    let pType = pTypes[Math.floor(Math.random() * pTypes.length)];
+                    let px = x + w/2 - 12;
+                    let py = y - 40;
+                    powerups.push(new PowerUp(px, py, pType));
+                }
+            }
+        }
+
+        function updateWind() {
+            if (maxAltitude < 200) return;
+            
+            if (WIND_CYCLE.cooldown > 0) {
+                WIND_CYCLE.cooldown--;
+                return;
+            }
+
+            WIND_CYCLE.timer++;
+            const warningElL = document.getElementById('wind-left');
+            const warningElR = document.getElementById('wind-right');
+
+            if (WIND_CYCLE.state === 'idle') {
+                warningElL.style.display = 'none';
+                warningElR.style.display = 'none';
+                WIND_CYCLE.force = 0;
+                
+                if (Math.random() < 0.0003) {
+                    WIND_CYCLE.state = 'warning';
+                    WIND_CYCLE.timer = 0;
+                    WIND_CYCLE.direction = Math.random() > 0.5 ? 1 : -1;
+                }
+            } 
+            else if (WIND_CYCLE.state === 'warning') {
+                if (WIND_CYCLE.direction === 1) {
+                    warningElL.style.display = 'flex';
+                    warningElR.style.display = 'none';
+                } else {
+                    warningElR.style.display = 'flex';
+                    warningElL.style.display = 'none';
+                }
+
+                if (WIND_CYCLE.timer > 180) {
+                    WIND_CYCLE.state = 'active';
+                    WIND_CYCLE.timer = 0;
+                    playWindSound();
+                }
+            }
+            else if (WIND_CYCLE.state === 'active') {
+                warningElL.style.display = 'none';
+                warningElR.style.display = 'none';
+                
+                WIND_CYCLE.force = 0.3 * WIND_CYCLE.direction;
+                
+                // Spawn wind particles
+                if (Math.random() > 0.5) {
+                    particles.push({
+                        x: WIND_CYCLE.direction === 1 ? -20 : canvas.width + 20,
+                        y: cameraY + Math.random() * canvas.height,
+                        vx: (Math.random() * 12 + 8) * WIND_CYCLE.direction,
+                        life: 80,
+                        type: 'wind'
+                    });
+                }
+                
+                // Spawn plastic bags during wind
+                if (Math.random() > 0.9) {
+                    plasticBags.push(new PlasticBag(
+                        WIND_CYCLE.direction === 1 ? -30 : canvas.width + 30,
+                        cameraY + Math.random() * canvas.height,
+                        WIND_CYCLE.direction
+                    ));
+                }
+
+                if (WIND_CYCLE.timer > 300) {
+                    // Reset force BEFORE transitioning to idle
+                    WIND_CYCLE.force = 0;
+                    WIND_CYCLE.state = 'idle';
+                    WIND_CYCLE.timer = 0;
+                    WIND_CYCLE.cooldown = 600;
+                }
+            }
+        }
+
+        // --- Core Loop ---
+
+        function update() {
+            if (!gameActive) return;
+            
+            // Handle dying animation
+            if (isDying) {
+                deathTimer++;
+                player.vy += player.stats.gravity;
+                player.y += player.vy;
+                
+                // Show game over after falling for a bit
+                if (deathTimer > 60 || player.y > cameraY + canvas.height + 200) {
+                    showGameOver();
+                }
+                return;
+            }
+
+            // 1. Controls (keyboard + mobile)
+            let moveDir = 0;
+            
+            // Keyboard
+            if (keys.ArrowLeft || keys.a || keys.A) { moveDir = -1; player.facingRight = false; }
+            if (keys.ArrowRight || keys.d || keys.D) { moveDir = 1; player.facingRight = true; }
+            
+            // Mobile tilt
+            if (isMobile && Math.abs(tiltX) > 0.3) {
+                moveDir = tiltX > 0 ? 1 : -1;
+                player.facingRight = tiltX > 0;
+                player.vx += tiltX * 0.5;
+            } else {
+                player.vx += moveDir * player.stats.speed;
+            }
+            
+            // Apply wind
+            player.vx += WIND_CYCLE.force;
+            player.vx *= FRICTION;
+            player.x += player.vx;
+
+            // Screen wrap
+            if (player.x < -player.w) player.x = canvas.width;
+            if (player.x > canvas.width) player.x = -player.w;
+
+            // 2. Gravity & Vertical Movement
+            let gravity = player.stats.gravity;
+            if (activePowerups.jetpack > 0) {
+                gravity *= 0.3; // Reduced gravity with jetpack
+                activePowerups.jetpack--;
+            }
+            player.vy += gravity;
+            player.y += player.vy;
+
+            // 3. Jump (keyboard + mobile touch)
+            let jumpPressed = (keys.ArrowUp || keys.w || keys.W || keys[' '] || touchJump);
+            if (jumpPressed && !keys.jumpLocked) {
+                if (player.onGround || player.jumpCount < player.stats.jumps) {
+                    let jumpForce = player.stats.jump;
+                    
+                    // Spring power-up effect
+                    if (activePowerups.springNext) {
+                        jumpForce *= 1.8;
+                        activePowerups.springNext = false;
+                        // Visual feedback
+                        for (let i = 0; i < 5; i++) {
+                            particles.push({
+                                x: player.x + player.w/2,
+                                y: player.y + player.h,
+                                vx: (Math.random() - 0.5) * 3,
+                                vy: Math.random() * 2 + 1,
+                                life: 30,
+                                type: 'spring'
+                            });
+                        }
+                    }
+                    
+                    player.vy = jumpForce;
+                    playJumpSound();
+                    player.jumpCount++;
+                    player.onGround = false;
+                    player.platform = null;
+                }
+                keys.jumpLocked = true;
+            }
+            if (!jumpPressed) keys.jumpLocked = false;
+
+            // 4. Platform Collision
+            player.onGround = false;
+            player.platform = null;
+
+            for (let p of platforms) {
+                p.update();
+                
+                if (!p.visible || (p.fading && p.fadeTimer < 15)) continue;
+
+                if (player.vy > 0 &&
+                    player.x + player.w > p.x &&
+                    player.x < p.x + p.w &&
+                    player.y + player.h >= p.y &&
+                    player.y + player.h <= p.y + p.h + player.vy + 5) {
+                    
+                    player.y = p.y - player.h;
+                    player.vy = 0;
+                    player.onGround = true;
+                    player.jumpCount = 0;
+                    player.platform = p;
+                    
+                    if (p.type === 'slippery') player.vx *= 1.06;
+                    if (p.type === 'conveyor') player.x += 2.5 * p.conveyorDir;
+                }
+            }
+
+            // 5. Moving Platform "Velcro"
+            if (player.onGround && player.platform && player.platform.type === 'moving') {
+                player.x += player.platform.dx;
+            }
+
+            // 6. Enemy Collision
+            for (let e of enemies) {
+                e.update();
+                
+                // Collision box
+                let hitboxShrink = 5;
+                if (player.x + player.w - hitboxShrink > e.x && 
+                    player.x + hitboxShrink < e.x + e.w &&
+                    player.y + player.h - hitboxShrink > e.y && 
+                    player.y + hitboxShrink < e.y + e.h) {
+                    
+                    if (activePowerups.shield) {
+                        // Shield absorbs hit
+                        activePowerups.shield = false;
+                        // Remove enemy
+                        e.y = 99999;
+                        // Visual feedback
+                        for (let i = 0; i < 10; i++) {
+                            particles.push({
+                                x: player.x + player.w/2,
+                                y: player.y + player.h/2,
+                                vx: (Math.random() - 0.5) * 5,
+                                vy: (Math.random() - 0.5) * 5,
+                                life: 30,
+                                type: 'shield'
+                            });
+                        }
+                    } else {
+                        startDying();
+                        return;
+                    }
+                }
+            }
+            
+            // 7. Power-up Collection
+            for (let p of powerups) {
+                if (p.collected) continue;
+                p.update();
+                
+                if (player.x + player.w > p.x && 
+                    player.x < p.x + p.w &&
+                    player.y + player.h > p.y && 
+                    player.y < p.y + p.h) {
+                    
+                    p.collected = true;
+                    playPowerupSound();
+                    
+                    if (p.type === 'spring') {
+                        activePowerups.springNext = true;
+                    } else if (p.type === 'jetpack') {
+                        activePowerups.jetpack = 180; // 3 seconds
+                    } else if (p.type === 'shield') {
+                        activePowerups.shield = true;
+                    }
+                    
+                    // Collection particles
+                    for (let i = 0; i < 8; i++) {
+                        particles.push({
+                            x: p.x + p.w/2,
+                            y: p.y + p.h/2,
+                            vx: (Math.random() - 0.5) * 4,
+                            vy: (Math.random() - 0.5) * 4,
+                            life: 40,
+                            type: p.type
+                        });
+                    }
+                }
+            }
+
+            // 8. Calculate Altitude
+            currentAltitude = Math.floor((startingY - player.y) / 10);
+            if (currentAltitude < 0) currentAltitude = 0;
+            if (currentAltitude > maxAltitude) {
+                maxAltitude = currentAltitude;
+            }
+
+            // 9. Camera - Fixed follow with ground clamp
+            let targetCamY = player.y - canvas.height * PLAYER_SCREEN_Y;
+            // Clamp camera so it doesn't go below ground level at start
+            let maxCamY = groundY - canvas.height + 100;
+            cameraY = Math.min(targetCamY, maxCamY);
+
+            // 10. Track lowest platform for death detection
+            if (platforms.length > 0) {
+                lowestPlatformY = platforms.reduce((max, p) => Math.max(max, p.y), -Infinity);
+            }
+
+            // 11. Generation & Cleanup
+            let highestP = platforms.reduce((min, p) => p.y < min.y ? p : min, platforms[0]);
+            if (highestP && highestP.y > cameraY - 200) {
+                generatePlatforms(highestP.y);
+            }
+
+            let cullY = cameraY + canvas.height + 300;
+            platforms = platforms.filter(p => p.y < cullY);
+            enemies = enemies.filter(e => e.y < cullY);
+            powerups = powerups.filter(p => !p.collected && p.y < cullY);
+
+            // 12. Death Check - fell below all platforms
+            if (player.y > lowestPlatformY + 150) {
+                startDying();
+                return;
+            }
+
+            // 13. Update Systems
+            updateWind();
+            
+            // Update particles
+            particles = particles.filter(p => {
+                p.x += p.vx || 0;
+                p.y += p.vy || 0;
+                if (p.type !== 'wind') p.vy = (p.vy || 0) + 0.1;
+                p.life--;
+                return p.life > 0;
+            });
+            
+            // Update plastic bags
+            plasticBags = plasticBags.filter(bag => {
+                bag.update();
+                return bag.life > 0 && bag.x > -100 && bag.x < canvas.width + 100;
+            });
+
+            updateUI();
+        }
+
+        function startDying() {
+            isDying = true;
+            deathTimer = 0;
+            player.vy = -5;
+            WIND_CYCLE.force = 0;
+            playDeathSound();
+        }
+
+        function showGameOver() {
+            gameActive = false;
+            isDying = false;
+            stopBackgroundMusic();
+            
+            if (maxAltitude > globalHighScore) {
+                globalHighScore = maxAltitude;
+                localStorage.setItem('recycle_high_score', globalHighScore);
+            }
+            
+            document.getElementById('final-score').innerText = maxAltitude + "m";
+            document.getElementById('best-score').innerText = globalHighScore + "m";
+            document.getElementById('game-over').style.display = 'flex';
+            
+            document.getElementById('wind-left').style.display = 'none';
+            document.getElementById('wind-right').style.display = 'none';
+
+            window.parent.postMessage({ type: 'score', value: maxAltitude}, '*');
+        }
+
+        function updateUI() {
+            document.getElementById('altitude-display').innerText = `${currentAltitude}m`;
+        }
+
+        // --- Drawing ---
+
+        function draw() {
+            // Sky gradient
+            let gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            let skyProgress = Math.min(maxAltitude / 10000, 1);
+            let topColor = lerpColor('#4A90D9', '#1a0a2e', skyProgress);
+            let bottomColor = lerpColor('#87CEEB', '#2d1b4e', skyProgress);
+            gradient.addColorStop(0, topColor);
+            gradient.addColorStop(1, bottomColor);
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 1. Draw Clouds
+            clouds.forEach(c => {
+                c.x += c.speed;
+                if (c.x > canvas.width + 100) {
+                    c.x = -150;
+                }
+                
+                let drawY = (c.baseY - cameraY * 0.3);
+                // Keep clouds in view range
+                while (drawY > canvas.height + 100) drawY -= canvas.height + 200;
+                while (drawY < -100) drawY += canvas.height + 200;
+                
+                ctx.fillStyle = `rgba(255, 255, 255, ${c.opacity})`;
+                ctx.beginPath();
+                let s = c.size;
+                ctx.arc(c.x, drawY, 25 * s, 0, Math.PI * 2);
+                ctx.arc(c.x + 30 * s, drawY - 10 * s, 35 * s, 0, Math.PI * 2);
+                ctx.arc(c.x + 60 * s, drawY, 28 * s, 0, Math.PI * 2);
+                ctx.arc(c.x + 35 * s, drawY + 10 * s, 20 * s, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // 2. High Score Line
+            if (globalHighScore > 0) {
+                let lineWorldY = startingY - (globalHighScore * 10);
+                let lineScreenY = lineWorldY - cameraY;
+                
+                if (lineScreenY > -20 && lineScreenY < canvas.height + 20) {
+                    ctx.strokeStyle = "rgba(255, 215, 0, 0.8)";
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([8, 8]);
+                    ctx.beginPath();
+                    ctx.moveTo(0, lineScreenY);
+                    ctx.lineTo(canvas.width, lineScreenY);
+                    ctx.stroke();
+                    
+                    ctx.setLineDash([]);
+                    ctx.fillStyle = "rgba(255, 215, 0, 0.9)";
+                    ctx.font = "bold 12px sans-serif";
+                    ctx.fillText(`★ BEST: ${globalHighScore}m`, 10, lineScreenY - 8);
+                }
+            }
+
+            // 3. Platforms
+            platforms.forEach(p => {
+                let screenY = p.y - cameraY;
+                if (screenY < canvas.height + 50 && screenY > -50) {
+                    p.draw(ctx, cameraY);
+                }
+            });
+
+            // 4. Power-ups
+            powerups.forEach(p => {
+                if (!p.collected) {
+                    let screenY = p.y - cameraY;
+                    if (screenY < canvas.height + 50 && screenY > -50) {
+                        p.draw(ctx, cameraY);
+                    }
+                }
+            });
+
+            // 5. Enemies
+            enemies.forEach(e => {
+                let screenY = e.y - cameraY;
+                if (screenY < canvas.height + 50 && screenY > -50) {
+                    e.draw(ctx, cameraY);
+                }
+            });
+
+            // 6. Plastic Bags (wind visual)
+            plasticBags.forEach(bag => {
+                bag.draw(ctx, cameraY);
+            });
+
+            // 7. Wind Particles
+            ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+            particles.forEach(p => {
+                if (p.type === 'wind') {
+                    ctx.fillRect(p.x, p.y - cameraY, 20, 2);
+                } else if (p.type === 'spring') {
+                    ctx.fillStyle = '#00FF00';
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y - cameraY, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                } else if (p.type === 'jetpack') {
+                    ctx.fillStyle = '#FF6600';
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y - cameraY, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                } else if (p.type === 'shield') {
+                    ctx.fillStyle = '#00FFFF';
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y - cameraY, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+
+            // 8. Player
+            if (gameActive || isDying) {
+                let drawY = player.y - cameraY;
+
+                // Shadow
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.beginPath();
+                ctx.ellipse(player.x + player.w/2 + 2, drawY + player.h + 3, player.w/2, 4, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Shield effect
+                if (activePowerups.shield) {
+                    ctx.strokeStyle = 'rgba(0, 255, 255, 0.6)';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(player.x + player.w/2, drawY + player.h/2, player.w, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+                
+                // Jetpack flames
+                if (activePowerups.jetpack > 0) {
+                    ctx.fillStyle = '#FF6600';
+                    let flicker = Math.sin(Date.now() / 30) * 3;
+                    ctx.beginPath();
+                    ctx.moveTo(player.x + 5, drawY + player.h);
+                    ctx.lineTo(player.x + player.w/2, drawY + player.h + 15 + flicker);
+                    ctx.lineTo(player.x + player.w - 5, drawY + player.h);
+                    ctx.fill();
+                    
+                    ctx.fillStyle = '#FFFF00';
+                    ctx.beginPath();
+                    ctx.moveTo(player.x + 8, drawY + player.h);
+                    ctx.lineTo(player.x + player.w/2, drawY + player.h + 8 + flicker/2);
+                    ctx.lineTo(player.x + player.w - 8, drawY + player.h);
+                    ctx.fill();
+                }
+
+                // Body (trapezoid bin shape)
+                ctx.fillStyle = player.color;
+                ctx.beginPath();
+                ctx.moveTo(player.x + 2, drawY);
+                ctx.lineTo(player.x + player.w - 2, drawY);
+                ctx.lineTo(player.x + player.w - 4, drawY + player.h);
+                ctx.lineTo(player.x + 4, drawY + player.h);
+                ctx.closePath();
+                ctx.fill();
+                
+                // Highlight
+                ctx.fillStyle = 'rgba(255,255,255,0.15)';
+                ctx.beginPath();
+                ctx.moveTo(player.x + 2, drawY);
+                ctx.lineTo(player.x + player.w/2, drawY);
+                ctx.lineTo(player.x + player.w/2 - 2, drawY + player.h);
+                ctx.lineTo(player.x + 4, drawY + player.h);
+                ctx.closePath();
+                ctx.fill();
+                
+                // Lid
+                ctx.fillStyle = player.lidColor;
+                drawRoundedRect(ctx, player.x - 3, drawY - 6, player.w + 6, 7, 3);
+                ctx.fill();
+                
+                // Handle
+                drawRoundedRect(ctx, player.x + player.w/2 - 4, drawY - 10, 8, 5, 2);
+                ctx.fill();
+
+                // Recycle symbol
+                ctx.fillStyle = 'rgba(255,255,255,0.9)';
+                ctx.beginPath();
+                let cx = player.x + player.w/2;
+                let cy = drawY + player.h/2 + 4;
+                ctx.moveTo(cx, cy - 6);
+                ctx.lineTo(cx + 6, cy + 4);
+                ctx.lineTo(cx - 6, cy + 4);
+                ctx.closePath();
+                ctx.fill();
+                
+                // Eyes
+                ctx.fillStyle = '#222';
+                let eyeOffset = player.facingRight ? 3 : -3;
+                ctx.beginPath();
+                ctx.arc(player.x + 9 + eyeOffset, drawY + 10, 3, 0, Math.PI * 2);
+                ctx.arc(player.x + 21 + eyeOffset, drawY + 10, 3, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Eye shine
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(player.x + 10 + eyeOffset, drawY + 9, 1, 0, Math.PI * 2);
+                ctx.arc(player.x + 22 + eyeOffset, drawY + 9, 1, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            requestAnimationFrame(loop);
+        }
+
+        function lerpColor(a, b, t) {
+            let ah = parseInt(a.replace('#', ''), 16);
+            let bh = parseInt(b.replace('#', ''), 16);
+            
+            let ar = (ah >> 16) & 0xff, ag = (ah >> 8) & 0xff, ab = ah & 0xff;
+            let br = (bh >> 16) & 0xff, bg = (bh >> 8) & 0xff, bb = bh & 0xff;
+            
+            let rr = Math.round(ar + (br - ar) * t);
+            let rg = Math.round(ag + (bg - ag) * t);
+            let rb = Math.round(ab + (bb - ab) * t);
+            
+            return `rgb(${rr}, ${rg}, ${rb})`;
+        }
+
+        function loop() {
+            update();
+            draw();
+        }
+
+        initCharSelect();
+        loop();
+
+    </script>
+</body>
+</html>
